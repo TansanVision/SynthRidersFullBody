@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <!-- Use the game install when it exists on this PC: -->
+    <GameDir>D:\SteamLibrary\steamapps\common\SynthRiders</GameDir>
+    <!-- For copied references, GameDir may point to the parent of MelonLoader: -->
+    <!-- <GameDir>C:\SynthRidersRefs</GameDir> -->
+    <!-- Or replace GameDir above with BOTH reference paths below: -->
+    <!-- <MelonDir>C:\SynthRidersRefs\MelonLoader</MelonDir> -->
+    <!-- <UnityAssembliesDir>C:\SynthRidersRefs\Il2CppAssemblies</UnityAssembliesDir> -->
+    <!-- Copy this file to GameDir.props; the local file is ignored by Git. -->
+  </PropertyGroup>
+</Project>

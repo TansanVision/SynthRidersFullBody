@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\GameDir.props" Condition="Exists('..\GameDir.props')" />
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <GameDir Condition="'$(GameDir)' == ''">$(SYNTH_RIDERS_DIR)</GameDir>
+    <MelonDir Condition="'$(MelonDir)' == '' and Exists('$(GameDir)\MelonLoader\net6\MelonLoader.dll')">$(GameDir)\MelonLoader</MelonDir>
+    <MelonDir Condition="'$(MelonDir)' == ''">$(MSBuildProjectDirectory)\Libs\MelonLoader</MelonDir>
+    <UnityAssembliesDir Condition="'$(UnityAssembliesDir)' == '' and Exists('$(GameDir)\MelonLoader\Il2CppAssemblies\UnityEngine.CoreModule.dll')">$(GameDir)\MelonLoader\Il2CppAssemblies</UnityAssembliesDir>
+    <UnityAssembliesDir Condition="'$(UnityAssembliesDir)' == '' and Exists('$(GameDir)\MelonLoader\Managed\UnityEngine.CoreModule.dll')">$(GameDir)\MelonLoader\Managed</UnityAssembliesDir>
+    <UnityAssembliesDir Condition="'$(UnityAssembliesDir)' == '' and Exists('$(MSBuildProjectDirectory)\Libs\MelonLoader\Il2CppAssemblies\UnityEngine.CoreModule.dll')">$(MSBuildProjectDirectory)\Libs\MelonLoader\Il2CppAssemblies</UnityAssembliesDir>
+  </PropertyGroup>
+
+  <Target Name="CheckGameReferences" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MelonDir)\net6\MelonLoader.dll')" Text="MelonLoader net6 references are not included in the source repository. Copy MelonLoader\net6 from your game PC to SynthRidersFullBody\Libs\MelonLoader\net6, or set GameDir/MelonDir. See docs/BUILDING.md." />
+    <Error Condition="!Exists('$(MelonDir)\net6\Il2CppInterop.Common.dll')" Text="Il2CppInterop.Common.dll is missing from $(MelonDir)\net6. Use the net6 folder from the same MelonLoader installation as the generated game references." />
+    <Error Condition="!Exists('$(MelonDir)\net6\Il2CppInterop.Runtime.dll')" Text="Il2CppInterop.Runtime.dll is missing from $(MelonDir)\net6. Use the net6 folder from the same MelonLoader installation as the generated game references." />
+    <Error Condition="'$(GameDir)' == '' and '$(UnityAssembliesDir)' == ''" Text="Copy the game's generated MelonLoader\Il2CppAssemblies directory to SynthRidersFullBody\Libs\MelonLoader\Il2CppAssemblies, or set GameDir/UnityAssembliesDir." />
+    <Error Condition="'$(UnityAssembliesDir)' == ''" Text="Unity reference assemblies were not found under $(GameDir)\MelonLoader. Install MelonLoader and launch Synth Riders once; then check for Il2CppAssemblies or Managed." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.AnimationModule.dll')" Text="UnityEngine.AnimationModule.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.XRModule.dll')" Text="UnityEngine.XRModule.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.TextRenderingModule.dll')" Text="UnityEngine.TextRenderingModule.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.UI.dll')" Text="UnityEngine.UI.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Unity.TextMeshPro.dll')" Text="Unity.TextMeshPro.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Assembly-CSharp.dll')" Text="The game's generated Assembly-CSharp.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Assembly-CSharp-firstpass.dll')" Text="The game's generated Assembly-CSharp-firstpass.dll is missing from $(UnityAssembliesDir)." />
+  </Target>
+
+  <ItemGroup>
+    <EmbeddedResource Include="OpenVrLicense.txt" />
+    <None Update="OpenVrLicense.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <Reference Include="MelonLoader"><HintPath>$(MelonDir)\net6\MelonLoader.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Il2CppInterop.Common"><HintPath>$(MelonDir)\net6\Il2CppInterop.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Il2CppInterop.Runtime"><HintPath>$(MelonDir)\net6\Il2CppInterop.Runtime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\Il2Cppmscorlib.dll" Condition="Exists('$(UnityAssembliesDir)\Il2Cppmscorlib.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\UnityEngine.CoreModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.CoreModule.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\UnityEngine.AnimationModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.AnimationModule.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\UnityEngine.PhysicsModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.PhysicsModule.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\UnityEngine.XRModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.XRModule.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\Unity.InputSystem.dll" Condition="Exists('$(UnityAssembliesDir)\Unity.InputSystem.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\UnityEngine.TextRenderingModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.TextRenderingModule.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\UnityEngine.UIModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.UIModule.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\UnityEngine.UI.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.UI.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\Unity.TextMeshPro.dll" Condition="Exists('$(UnityAssembliesDir)\Unity.TextMeshPro.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\Assembly-CSharp.dll" Condition="Exists('$(UnityAssembliesDir)\Assembly-CSharp.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\Assembly-CSharp-firstpass.dll" Condition="Exists('$(UnityAssembliesDir)\Assembly-CSharp-firstpass.dll')"><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

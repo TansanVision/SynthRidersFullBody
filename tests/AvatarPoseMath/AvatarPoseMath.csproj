@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../SynthRidersFullBody/AvatarPoseMath.cs" Link="AvatarPoseMath.cs" />
+    <Compile Include="../../SynthRidersFullBody/CalibrationPoseCheck.cs" Link="CalibrationPoseCheck.cs" />
+    <Compile Include="../../SynthRidersFullBody/UltimateTrackerCorrection.cs" Link="UltimateTrackerCorrection.cs" />
+    <Compile Include="../../SynthRidersFullBody/TrackerAvailability.cs" Link="TrackerAvailability.cs" />
+    <Compile Include="../../SynthRidersFullBody/TrackerAssignmentPolicy.cs" Link="TrackerAssignmentPolicy.cs" />
+    <Compile Include="../../SynthRidersFullBody/RigidPoseOffset.cs" Link="RigidPoseOffset.cs" />
+    <Compile Include="../../SynthRidersFullBody/OptionalMember.cs" Link="OptionalMember.cs" />
+    <Compile Include="../../SynthRidersFullBody/TrackerRoles.cs" Link="TrackerRoles.cs" />
+    <Compile Include="../../SynthRidersFullBody/AutoBodyAssignment.cs" Link="AutoBodyAssignment.cs" />
+    <Compile Include="../../SynthRidersFullBody/DualFootMath.cs" Link="DualFootMath.cs" />
+    <Compile Include="../../SynthRidersFullBody/CalibrationRecoveryMath.cs" Link="CalibrationRecoveryMath.cs" />
+    <Compile Include="../../SynthRidersFullBody/VrPanelLayout.cs" Link="VrPanelLayout.cs" />
+    <Compile Include="../../SynthRidersFullBody/AvatarScaleMath.cs" Link="AvatarScaleMath.cs" />
+    <Compile Include="../../SynthRidersFullBody/CaptureCameraResolver.cs" Link="CaptureCameraResolver.cs" />
+  </ItemGroup>
+</Project>
