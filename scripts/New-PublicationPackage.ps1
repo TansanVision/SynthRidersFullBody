@@ -136,7 +136,6 @@ $sourceFiles = @(
     $documentationFiles
     '.gitignore'
     '.gitattributes'
-    'GameDir.props.example'
     'SynthRidersFullBody.sln'
     'scripts/New-PublicationPackage.ps1'
     'SynthRidersFullBody/OpenVrLicense.txt'

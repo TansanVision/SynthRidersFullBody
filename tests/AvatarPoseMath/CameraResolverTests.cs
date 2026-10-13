@@ -125,6 +125,17 @@ namespace UnityEngine
     public class Transform : Component
     {
         public Transform? parent;
+        public System.Numerics.Vector3 localPosition;
+        public System.Numerics.Vector3 localScale = System.Numerics.Vector3.One;
+        public Quaternion localRotation = Quaternion.identity;
+        public Quaternion rotation
+        {
+            get => parent == null ? localRotation : parent.rotation * localRotation;
+            set => localRotation = parent == null ? value : Quaternion.Inverse(parent.rotation) * value;
+        }
+        public System.Numerics.Vector3 lossyScale => (parent?.lossyScale ?? System.Numerics.Vector3.One) * localScale;
+        public System.Numerics.Vector3 position => parent == null ? localPosition : parent.position +
+            System.Numerics.Vector3.Transform(localPosition * parent.lossyScale, parent.rotation.Value);
         public Transform(GameObject go) : base(go) { }
         public bool IsChildOf(Transform other) => this == other || parent?.IsChildOf(other) == true;
         public T[] GetComponentsInChildren<T>(bool includeInactive) where T : Component =>

@@ -292,6 +292,7 @@ foreach (var invalidHead in new[] { Vector3.Zero, new Vector3(0, -1, 0), new Vec
 Check(!AvatarScaleMath.TryFit(Vector3.Zero, Vector3.One, new(0, 2, 0), Vector3.Zero, Vector3.Zero,
     new(0, 1.7f, 0), Vector3.Zero, new(0, 0.4f, 0), out _, out _, out _), "A lifted foot changed calibration size.");
 CameraResolverTests.Run(Check);
+ToeRotationTests.Run(Check);
 CalibrationPoseTests.Run(Check);
 UltimateTrackerCorrectionTests.Run(Check);
 Console.WriteLine($"Pose math / tracker assignment / camera compatibility / scene recovery / UI layout / size fit tests passed ({checks} checks).");

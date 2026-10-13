@@ -139,6 +139,8 @@ internal sealed class AvatarIK
     private readonly Transform _rightUpper;
     private readonly Transform _rightLower;
     private readonly Transform _rightFoot;
+    private readonly CalibratedToeRotation _leftToeRotation;
+    private readonly CalibratedToeRotation _rightToeRotation;
     /// <summary>
     /// VRIKに左足先が登録されていれば足先、なければ左足首のボーンを取得します。
     /// </summary>
@@ -163,6 +165,8 @@ internal sealed class AvatarIK
     private float _lastSolveTime = -1f;
     private float _pelvisErrorAfterSolve;
     private float _pelvisAngleAfterSolve;
+    private float _leftFootErrorAfterSolve;
+    private float _rightFootErrorAfterSolve;
     private Pose _rawWaist;
     private Vector3 _waistCalibrationPosition;
     private Vector3 _pelvisCalibrationPosition;
@@ -281,6 +285,8 @@ internal sealed class AvatarIK
         _rightUpper = animator.GetBoneTransform(HumanBodyBones.RightUpperLeg);
         _rightLower = animator.GetBoneTransform(HumanBodyBones.RightLowerLeg);
         _rightFoot = animator.GetBoneTransform(HumanBodyBones.RightFoot);
+        _leftToeRotation = new CalibratedToeRotation(_leftFoot, animator.GetBoneTransform(HumanBodyBones.LeftToes));
+        _rightToeRotation = new CalibratedToeRotation(_rightFoot, animator.GetBoneTransform(HumanBodyBones.RightToes));
         _chest = animator.GetBoneTransform(HumanBodyBones.Chest) ??
             animator.GetBoneTransform(HumanBodyBones.UpperChest);
         MeasureLegLengths();
@@ -441,6 +447,11 @@ internal sealed class AvatarIK
             {
                 ApplyTrackedConstraints();
                 _additional.ApplyBindings();
+                // VRIK reads the animated pose. Do not feed an unmeasured toe
+                // bend (or the previous solve's bend) back into the next solve.
+                if (_hasAppliedTargets && _boundSolver!.LOD < 2)
+                    ApplyUnmeasuredToeRotations(_hasLeftTracking, _hasRightTracking,
+                        _trackingBlend * Mathf.Clamp01(_boundSolver.IKPositionWeight));
             }
         }
         catch (Exception exception)
@@ -457,16 +468,33 @@ internal sealed class AvatarIK
         try
         {
             if (!_calibrated || _usingGameTargets || !_hasAppliedTargets || !OwnsIkTargets()) return;
+            if (_boundSolver!.LOD < 2)
+                ApplyUnmeasuredToeRotations(_hasLeftTracking, _hasRightTracking,
+                    _trackingBlend * Mathf.Clamp01(_boundSolver.IKPositionWeight));
             _additional.ApplyToeRotations(_hasLeftTracking, _hasRightTracking);
             _solveCount++;
             _lastSolveTime = Time.unscaledTime;
             _pelvisErrorAfterSolve = Vector3.Distance(_hips.position, _pelvisTarget!.position);
             _pelvisAngleAfterSolve = Quaternion.Angle(_hips.rotation, _pelvisTarget.rotation);
+            _leftFootErrorAfterSolve = Vector3.Distance(LeftLegEnd.position, _leftTarget!.position);
+            _rightFootErrorAfterSolve = Vector3.Distance(RightLegEnd.position, _rightTarget!.position);
         }
         catch (Exception exception)
         {
             _solveError = $"VRIK post-solve failed: {exception.GetType().Name}: {exception.Message}";
         }
+    }
+
+    /// <summary>
+    /// 足先を独立計測していない足だけ、校正時の足首に対する足先角度へ戻します。
+    /// </summary>
+    /// <param name="left">左足の主入力が有効か。</param>
+    /// <param name="right">右足の主入力が有効か。</param>
+    /// <param name="weight">追跡とソルバーを合わせた適用重み。</param>
+    private void ApplyUnmeasuredToeRotations(bool left, bool right, float weight)
+    {
+        _leftToeRotation.Apply(left, _additional.DualLeft, weight);
+        _rightToeRotation.Apply(right, _additional.DualRight, weight);
     }
 
     /// <summary>
@@ -574,6 +602,8 @@ internal sealed class AvatarIK
             ToNumerics(_leftFoot.rotation), ToNumerics(LeftLegEnd.position), ToNumerics(LeftLegEnd.rotation));
         _rightEndOffset = RigidPoseOffset.Between(ToNumerics(_rightFoot.position),
             ToNumerics(_rightFoot.rotation), ToNumerics(RightLegEnd.position), ToNumerics(RightLegEnd.rotation));
+        _leftToeRotation.Capture();
+        _rightToeRotation.Capture();
         var head = Animator.GetBoneTransform(HumanBodyBones.Head);
         var headTarget = _ik?.solver?.spine?.headTarget;
         _hasHeadReference = head != null && headTarget != null && camera != null;
@@ -695,6 +725,9 @@ internal sealed class AvatarIK
             $"post-solve pelvis error={_pelvisErrorAfterSolve:0.000}m/{_pelvisAngleAfterSolve:0.#}deg, " +
             $"late pelvis error={pelvisError:0.000}m/{pelvisAngle:0.#}deg, " +
             $"feet bone-target=({leftError:0.000},{rightError:0.000})m, " +
+            $"post-solve feet error=({_leftFootErrorAfterSolve:0.000}/{_rightFootErrorAfterSolve:0.000})m, " +
+            $"toe neutral correction=({_leftToeRotation.CorrectionDegrees:0.#}/{_rightToeRotation.CorrectionDegrees:0.#})deg, " +
+            $"dual toes=({_additional.DualLeft}/{_additional.DualRight}), " +
             $"left input/target travel=({Vector3.Distance(_lastLeftPose.Position, _leftTrackerReferencePosition):0.000}/" +
             $"{Vector3.Distance(_leftTarget.position, _leftTargetReferencePosition):0.000})m, " +
             $"right input/target travel=({Vector3.Distance(_lastRightPose.Position, _rightTrackerReferencePosition):0.000}/" +
@@ -958,6 +991,7 @@ internal sealed class AvatarIK
             leftPosition, leftRotation, leftBend, maxKneeFlexion);
         if (hasRight) SolveLeg(_rightUpper, _rightLower, _rightFoot,
             rightPosition, rightRotation, rightBend, maxKneeFlexion);
+        ApplyUnmeasuredToeRotations(hasLeft, hasRight, 1f);
     }
 
     /// <summary>

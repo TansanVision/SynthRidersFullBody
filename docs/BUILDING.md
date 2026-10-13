@@ -11,17 +11,7 @@
 
 生成元のゲームとMelonLoaderのバージョンを揃えてください。ゲーム更新後は生成済み参照DLLも更新します。exe・ゲーム素材・`Cpp2IL/cpp2il_out` のコピーは不要です。
 
-## ゲームをインストールしているPC
-
-リポジトリのルートで実行します。パスは自分のゲームのインストール先に置き換えます。
-
-```powershell
-dotnet build .\SynthRidersFullBody.sln -c Release -p:GameDir="D:\SteamLibrary\steamapps\common\SynthRiders"
-```
-
-Visual Studioの場合は `GameDir.props.example` を `GameDir.props` にコピーして `GameDir` を変更します。`GameDir.props` はGitの除外対象です。例のファイルだけを公開します。
-
-## ゲームがない開発PC
+## 開発PCでビルドし、ゲームPCで動作確認する
 
 ゲームPCから、同じMelonLoaderの次の2フォルダーを開発PCへコピーします。公開リポジトリ・配布ZIPには追加しません。
 
@@ -46,6 +36,20 @@ SynthRidersFullBody/
 ```powershell
 dotnet build .\SynthRidersFullBody.sln -c Release
 ```
+
+参照先を設定する `.props` ファイルは不要です。Visual Studioでも、ソリューションを開いてRelease構成でビルドすると、この配置のDLLを自動検出します。
+
+ビルドした `SynthRidersFullBody/bin/Release/net6.0/SynthRidersFullBody.dll` をゲームPCへコピーし、ゲームの `Mods` に配置して動作確認します。ゲーム更新やMelonLoader更新時は、開発PCの参照DLLもゲームPCからコピーし直します。
+
+## ゲームをインストールしているPCでビルドする
+
+ゲームのインストール先から直接参照する場合は、コマンドにパスを指定します。
+
+```powershell
+dotnet build .\SynthRidersFullBody.sln -c Release -p:GameDir="D:\SteamLibrary\steamapps\common\SynthRiders"
+```
+
+## 参照DLLを別の場所へ置く場合
 
 リポジトリの外へ置く場合は、コピー先の `MelonLoader` を含む親フォルダーを `GameDir` に指定します。
 

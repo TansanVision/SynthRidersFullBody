@@ -2,7 +2,7 @@ using MelonLoader;
 using Il2CppSynth.Avatars;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.49.0", "SynthRidersFullBody")]
+[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.50.0", "SynthRidersFullBody")]
 
 namespace SynthRidersFullBody;
 
@@ -420,7 +420,8 @@ public sealed class FullBodyMod : MelonMod
                             $"waist above feet={stableWaist.Position.y - (stableLeft.Position.y + stableRight.Position.y) * 0.5f:0.00} m.");
                         LoggerInstance.Msg($"Avatar rig: {_avatar.RigSummary}.");
                         LoggerInstance.Msg($"Calibrated tracker roles: waist={_tracking.AssignmentLabel(TrackerRole.Waist)}, " +
-                            $"left={_tracking.AssignmentLabel(TrackerRole.LeftFoot)}, right={_tracking.AssignmentLabel(TrackerRole.RightFoot)}.");
+                            $"left ({TrackerRoles.Label(_tracking.PrimaryFoot(true))})={_tracking.AssignmentLabel(_tracking.PrimaryFoot(true))}, " +
+                            $"right ({TrackerRoles.Label(_tracking.PrimaryFoot(false))})={_tracking.AssignmentLabel(_tracking.PrimaryFoot(false))}.");
                         foreach (var role in TrackerRoles.All.Where(_tracking.HasAssignment))
                             LoggerInstance.Msg($"Assigned {TrackerRoles.Label(role)}: {_tracking.AssignmentLabel(role)}.");
                         LoggerInstance.Msg($"Calibration reference pose: {_avatar.CalibrationPoseSource}.");

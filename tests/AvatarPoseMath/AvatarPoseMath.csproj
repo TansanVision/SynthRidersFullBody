@@ -21,5 +21,6 @@
     <Compile Include="../../SynthRidersFullBody/VrPanelLayout.cs" Link="VrPanelLayout.cs" />
     <Compile Include="../../SynthRidersFullBody/AvatarScaleMath.cs" Link="AvatarScaleMath.cs" />
     <Compile Include="../../SynthRidersFullBody/CaptureCameraResolver.cs" Link="CaptureCameraResolver.cs" />
+    <Compile Include="../../SynthRidersFullBody/CalibratedToeRotation.cs" Link="CalibratedToeRotation.cs" />
   </ItemGroup>
 </Project>
