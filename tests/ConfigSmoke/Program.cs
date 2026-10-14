@@ -12,6 +12,11 @@ try
     Check(!config.ShowCaptureCameraGuide && !config.DisableAvatarShadows &&
           !config.DisableAvatarLights, "Visual options must start disabled.");
     Check(!config.UltimateTrackerRotate180, "Ultimate rotation must be opt-in for existing aligned environments.");
+    Check(!config.ExpressionsEnabled && config.ExpressionBindings.Count == 0,
+        "Expression buttons must be opt-in and initially unassigned.");
+    config.ExpressionsEnabled = true;
+    config.ExpressionBindings["LeftPrimary"] = new() { Expression = "preset:happy" };
+    config.ExpressionBindings["RightSecondary"] = new() { Expression = "custom:Smile", Toggle = true };
     config.WaistSerial = "waist-123";
     config.ShowCaptureCameraGuide = true;
     config.DisableAvatarShadows = true;
@@ -20,6 +25,10 @@ try
     config.AvatarVisibleInHeadset["file:example.vrm"] = false;
     config.Save(path);
     var reloaded = ModConfig.Load(path);
+    Check(reloaded.ExpressionsEnabled && reloaded.ExpressionBindings["LeftPrimary"].Expression == "preset:happy" &&
+        !reloaded.ExpressionBindings["LeftPrimary"].Toggle &&
+        reloaded.ExpressionBindings["RightSecondary"] == config.ExpressionBindings["RightSecondary"],
+        "Expression enable flag, custom ID or hold/toggle mode did not round trip.");
     Check(reloaded.WaistSerial == "waist-123" &&
           reloaded.ShowCaptureCameraGuide && reloaded.DisableAvatarShadows &&
           reloaded.DisableAvatarLights &&
@@ -33,6 +42,8 @@ try
         "{\"CorrectionVersion\":1,\"PelvisMaxTiltDegrees\":30," +
         "\"PelvisRotationWeight\":0.7,\"WaistSerial\":\"waist-123\"}");
     var migrated = ModConfig.Load(path);
+    Check(!migrated.ExpressionsEnabled && migrated.ExpressionBindings.Count == 0,
+        "Legacy configuration unexpectedly assigned controller buttons.");
     Check(!migrated.UltimateTrackerRotate180, "Legacy settings unexpectedly enabled Ultimate rotation.");
     Check(migrated.CorrectionVersion == 4 && migrated.PelvisMaxTiltDegrees == 20f &&
           migrated.PelvisRotationWeight == 1f && migrated.WaistSerial == "waist-123",
@@ -100,6 +111,13 @@ try
     File.WriteAllText(path, "{\"RoleBindings\":{\"Waist\":null,\"Head\":{\"Source\":null,\"Serial\":null}}}");
     var sanitized = ModConfig.Load(path);
     Check(!sanitized.RoleBindings.ContainsKey("Waist") && sanitized.RoleBindings["Head"].Serial == "", "Null role fields were not handled.");
+
+    File.WriteAllText(path, "{\"ExpressionBindings\":null}");
+    Check(ModConfig.Load(path).ExpressionBindings.Count == 0, "Null expression dictionary was not repaired.");
+    File.WriteAllText(path, "{\"ExpressionBindings\":{\"LeftPrimary\":null,\"RightGrip\":{\"Expression\":null},\"999\":{},\"Unknown\":{}}}");
+    var expressions = ModConfig.Load(path).ExpressionBindings;
+    Check(expressions.Count == 1 && expressions["RightGrip"].Expression == "",
+        "Null or invalid expression binding was not sanitized.");
 
     const string damaged = "{invalid json";
     File.WriteAllText(path, damaged);

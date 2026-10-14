@@ -120,6 +120,8 @@ namespace UnityEngine
         public Scene scene { get; } = new();
         public Transform transform { get; }
         public GameObject(string name) { this.name = name; transform = new Transform(this); }
+        public T? GetComponentInChildren<T>(bool includeInactive) where T : Component =>
+            transform.GetComponentsInChildren<T>(includeInactive).FirstOrDefault();
     }
     public class Scene { public bool Valid = true; public bool IsValid() => Valid; }
     public class Transform : Component

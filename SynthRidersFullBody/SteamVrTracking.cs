@@ -116,6 +116,33 @@ internal sealed class SteamVrTracking
             (state.ulButtonPressed & (1UL << (int)EVRButtonId.k_EButton_SteamVR_Trigger)) != 0;
     }
 
+    /// <summary>選択したOpenVRコントローラーの主・副・グリップ入力を3ビットで取得します。</summary>
+    /// <param name="id">コントローラーの現在のデバイス番号。</param>
+    /// <returns>押下ビットと対応ボタンのビット。読み取れない場合は両方0です。</returns>
+    public (int Pressed, int Available) ExpressionButtons(string id)
+    {
+        if (_system == null || !uint.TryParse(id, out var index)) return default;
+        var state = new VRControllerState_t();
+        if (!_system.GetControllerState(index, ref state, (uint)Marshal.SizeOf<VRControllerState_t>())) return default;
+        var error = ETrackedPropertyError.TrackedProp_Success;
+        var supported = _system.GetUint64TrackedDeviceProperty(index,
+            ETrackedDeviceProperty.Prop_SupportedButtons_Uint64, ref error);
+        if (error != ETrackedPropertyError.TrackedProp_Success) return default;
+        var primary = (supported & (1UL << (int)EVRButtonId.k_EButton_A)) != 0
+            ? EVRButtonId.k_EButton_A : EVRButtonId.k_EButton_SteamVR_Touchpad;
+        var pressed = 0;
+        var available = 0;
+        for (var i = 0; i < 3; i++)
+        {
+            var button = i == 0 ? primary : i == 1 ? EVRButtonId.k_EButton_ApplicationMenu : EVRButtonId.k_EButton_Grip;
+            var mask = 1UL << (int)button;
+            if ((supported & mask) == 0) continue;
+            available |= 1 << i;
+            if ((state.ulButtonPressed & mask) != 0) pressed |= 1 << i;
+        }
+        return (pressed, available);
+    }
+
     /// <summary>
     /// 再試行間隔を守りながら、OpenVRをバックグラウンドアプリとして初期化します。
     /// </summary>

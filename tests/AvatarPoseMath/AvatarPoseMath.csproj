@@ -7,6 +7,9 @@
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../SynthRidersFullBody/ExpressionControls.cs" Link="ExpressionControls.cs" />
+    <Compile Include="../../SynthRidersFullBody/AvatarExpressions.cs" Link="AvatarExpressions.cs" />
+    <Compile Include="../../SynthRidersFullBody/ModConfig.cs" Link="ModConfig.cs" />
     <Compile Include="../../SynthRidersFullBody/AvatarPoseMath.cs" Link="AvatarPoseMath.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibrationPoseCheck.cs" Link="CalibrationPoseCheck.cs" />
     <Compile Include="../../SynthRidersFullBody/UltimateTrackerCorrection.cs" Link="UltimateTrackerCorrection.cs" />

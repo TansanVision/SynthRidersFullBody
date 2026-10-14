@@ -295,7 +295,9 @@ CameraResolverTests.Run(Check);
 ToeRotationTests.Run(Check);
 CalibrationPoseTests.Run(Check);
 UltimateTrackerCorrectionTests.Run(Check);
-Console.WriteLine($"Pose math / tracker assignment / camera compatibility / scene recovery / UI layout / size fit tests passed ({checks} checks).");
+ExpressionControlTests.Run(Check);
+AvatarExpressionTests.Run(Check);
+Console.WriteLine($"Pose math / tracker assignment / camera compatibility / scene recovery / UI layout / size fit / expressions tests passed ({checks} checks).");
 
 void Check(bool passed, string message)
 {

@@ -52,6 +52,10 @@ public sealed class ModConfig
     /// アバター識別キーごとの一人称表示希望値です。
     /// </summary>
     public Dictionary<string, bool> AvatarVisibleInHeadset { get; set; } = new();
+    /// <summary>コントローラーによる表情操作を有効にします。初期状態では無効です。</summary>
+    public bool ExpressionsEnabled { get; set; }
+    /// <summary>全アバター共通のボタンと表情の割り当て。存在しない表情は適用しません。</summary>
+    public Dictionary<string, ExpressionBinding> ExpressionBindings { get; set; } = new();
     /// <summary>
     /// 追跡入力の適応型平滑化を有効にするかを指定します。
     /// </summary>
@@ -128,6 +132,15 @@ public sealed class ModConfig
             var json = File.ReadAllText(path);
             var config = JsonSerializer.Deserialize<ModConfig>(json) ?? new ModConfig();
             using var document = JsonDocument.Parse(json);
+            config.ExpressionBindings ??= new();
+            foreach (var key in config.ExpressionBindings.Keys.ToArray())
+            {
+                var binding = config.ExpressionBindings[key];
+                if (binding == null || !Enum.TryParse<ExpressionButton>(key, out var button) ||
+                    !Enum.IsDefined(typeof(ExpressionButton), button) || button.ToString() != key)
+                    config.ExpressionBindings.Remove(key);
+                else config.ExpressionBindings[key] = binding with { Expression = binding.Expression ?? "" };
+            }
             config.RoleBindings ??= new();
             foreach (var key in config.RoleBindings.Keys.ToArray())
             {

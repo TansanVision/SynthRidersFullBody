@@ -131,5 +131,12 @@ namespace UnityEngine
             System.Numerics.Quaternion.Dot(System.Numerics.Quaternion.Normalize(a.Value),
                 System.Numerics.Quaternion.Normalize(b.Value))), 0, 1)) * 180 / MathF.PI;
     }
-    public static class Mathf { public static float Clamp01(float value) => Math.Clamp(value, 0, 1); }
+    public static class Mathf
+    {
+        public static float Clamp01(float value) => Math.Clamp(value, 0, 1);
+        public static float Abs(float value) => Math.Abs(value);
+        public static float Clamp(float value, float min, float max) => Math.Clamp(value, min, max);
+        public static float MoveTowards(float current, float target, float delta) =>
+            current + Math.Clamp(target - current, -delta, delta);
+    }
 }

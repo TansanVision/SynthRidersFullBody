@@ -27,9 +27,13 @@
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Unity.TextMeshPro.dll')" Text="Unity.TextMeshPro.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Assembly-CSharp.dll')" Text="The game's generated Assembly-CSharp.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Assembly-CSharp-firstpass.dll')" Text="The game's generated Assembly-CSharp-firstpass.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Il2CppVRM.dll')" Text="Il2CppVRM.dll is missing from $(UnityAssembliesDir). Copy the complete generated Il2CppAssemblies folder from the game PC; expression support requires its VRM references." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Il2CppVRM10.dll')" Text="Il2CppVRM10.dll is missing from $(UnityAssembliesDir). Copy the complete generated Il2CppAssemblies folder from the game PC; expression support requires its VRM 1.0 references." />
   </Target>
 
   <ItemGroup>
+    <Reference Include="$(UnityAssembliesDir)\Il2CppVRM.dll" Condition="Exists('$(UnityAssembliesDir)\Il2CppVRM.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\Il2CppVRM10.dll" Condition="Exists('$(UnityAssembliesDir)\Il2CppVRM10.dll')"><Private>false</Private></Reference>
     <EmbeddedResource Include="OpenVrLicense.txt" />
     <None Update="OpenVrLicense.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />

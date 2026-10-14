@@ -56,7 +56,9 @@ internal enum PanelCommand
     /// <summary>
     /// Ultimate Trackerの位置・回転の180度補正を切り替え、再校正を要求します。
     /// </summary>
-    ToggleUltimateRotation
+    ToggleUltimateRotation,
+    /// <summary>表情設定の変更を保存する要求。全身校正は無効化しません。</summary>
+    ExpressionsChanged
 }
 
 /// <summary>
@@ -115,6 +117,25 @@ internal sealed class SettingsPanel
     private bool _tPoseMode = true;
     private bool _roleScreen;
     private bool _visualScreen;
+    private bool _expressionScreen;
+    private ExpressionButton? _expressionButton;
+    private int _expressionHand;
+    private int _expressionPage;
+    private ModConfig? _expressionConfig;
+    private AvatarExpressions? _expressions;
+    private ExpressionInput _expressionInput;
+    private readonly string?[] _visibleExpressions = new string?[3];
+
+    /// <summary>表情設定画面を表示中か。ここではボタンの表情プレビューを許可します。</summary>
+    public bool IsExpressionScreen => IsOpen && _expressionScreen;
+
+    /// <summary>表情一覧・設定・入力状態を受け取り、設定画面の表示に使用します。</summary>
+    public void SetExpressionContext(ModConfig config, AvatarExpressions expressions, ExpressionInput input)
+    {
+        _expressionConfig = config;
+        _expressions = expressions;
+        _expressionInput = input;
+    }
     private int _armedRoleRow = -1;
     private float _armedRoleUntil;
     private string? _armedDeviceKey;
@@ -256,6 +277,7 @@ internal sealed class SettingsPanel
         _calibrationScreen = true;
         _roleScreen = false;
         _visualScreen = false;
+        _expressionScreen = false;
         ClearCalibrationResult();
         _previousTrigger = true;
         _previousLeftTrigger = true;
@@ -278,6 +300,7 @@ internal sealed class SettingsPanel
         _calibrationScreen = false;
         _roleScreen = false;
         _visualScreen = false;
+        _expressionScreen = false;
         _previousTrigger = true;
         _previousLeftTrigger = true;
         _previousRightTrigger = true;
@@ -570,10 +593,12 @@ internal sealed class SettingsPanel
         if (dashboardVisualFocused)
         {
             _visualScreen = true;
+            _expressionScreen = false;
             _nextTextUpdate = 0f;
             return PanelCommand.None;
         }
         if (row < 0) return PanelCommand.None;
+        if (_expressionScreen) return HandleExpressionRow(row);
         if (_visualScreen)
         {
             if (row == 0) return PanelCommand.ToggleCameraGuide;
@@ -683,6 +708,13 @@ internal sealed class SettingsPanel
             return PanelCommand.None;
         }
         if (row == 2) return PanelCommand.ToggleTracking;
+        if (row == 4)
+        {
+            _expressionScreen = true;
+            _expressionButton = null;
+            _nextTextUpdate = 0f;
+            return PanelCommand.None;
+        }
         if (row == 5) return PanelCommand.ToggleUltimateRotation;
         if (row == 3)
         {
@@ -849,6 +881,7 @@ internal sealed class SettingsPanel
         }
         UpdateDashboardText(tracking);
         for (var i = 0; i < _rows.Length; i++) _rows[i]!.fontSize = 33f;
+        if (_expressionScreen) { UpdateExpressionText(); return; }
         if (_roleScreen) { UpdateRoleText(tracking); return; }
         _title!.text = _calibrationScreen
             ? (_tPoseMode ? "T-POSE CALIBRATION" : "STANDING CALIBRATION")
@@ -891,13 +924,112 @@ internal sealed class SettingsPanel
             _rows[1]!.text = "TRACKER ROLES  >";
             _rows[2]!.text = $"Tracking: {(enabled ? "ON" : "OFF")}";
             _rows[3]!.text = "VISUAL OPTIONS  >";
-            _rows[4]!.text = _bodyStatus;
+            _rows[4]!.text = "EXPRESSIONS  >";
             _rows[5]!.text = $"Ultimate 180 correction: {(tracking.UltimateCorrectionEnabled ? "ON" : "OFF")}";
-            _rows[4]!.fontSize = 24f;
             _rows[5]!.fontSize = 30f;
             _rows[6]!.text = "Close panel";
             _footer!.text = "Ultimate correction: for reversed forward AND sideways motion\nAfter changing this option, calibrate again";
         }
+    }
+
+    /// <summary>選択肢として未割り当て・解除・現在のVRMが持つ表情を列挙します。</summary>
+    private List<ExpressionChoice> ExpressionOptions()
+    {
+        var choices = new List<ExpressionChoice> { new("", "Unassigned"), new("$reset", "Reset expression") };
+        if (_expressions != null) choices.AddRange(_expressions.Choices);
+        return choices;
+    }
+
+    /// <summary>保存したIDに対応する表示名を返し、現在のモデルに存在しない表情を明示します。</summary>
+    private string ExpressionLabel(string? id) => ExpressionOptions().FirstOrDefault(c => c.Id == id).Label
+        ?? (string.IsNullOrEmpty(id) ? "Unassigned" : "Unavailable on this avatar");
+
+    /// <summary>現在編集中のボタンの設定を取得し、未設定時は押下中のみの空設定を返します。</summary>
+    private ExpressionBinding GetExpressionBinding(ExpressionButton button) =>
+        _expressionConfig?.ExpressionBindings?.GetValueOrDefault(button.ToString()) ?? new ExpressionBinding();
+
+    /// <summary>表情ボタン一覧または表情選択画面を表示します。</summary>
+    private void UpdateExpressionText()
+    {
+        if (_expressionConfig == null || _expressions == null) return;
+        foreach (var text in _rows) if (text != null) text.fontSize = 27f;
+        _status!.text = _expressions.Status;
+        _title!.text = "CONTROLLER EXPRESSIONS";
+        Array.Clear(_visibleExpressions);
+        if (_expressionButton is { } button)
+        {
+            var binding = GetExpressionBinding(button);
+            var options = ExpressionOptions();
+            var pages = Math.Max(1, (options.Count + 2) / 3);
+            _expressionPage = Math.Min(_expressionPage, pages - 1);
+            _title.text = ExpressionControls.Label(button).ToUpperInvariant();
+            _rows[0]!.text = $"Mode: {(binding.Toggle ? "Toggle" : "Hold")}  >";
+            for (var i = 0; i < 3; i++)
+            {
+                var index = _expressionPage * 3 + i;
+                if (index >= options.Count) { _rows[i + 1]!.text = ""; continue; }
+                var choice = options[index];
+                _visibleExpressions[i] = choice.Id;
+                _rows[i + 1]!.text = (choice.Id == binding.Expression ? "[Selected] " : "") + choice.Label;
+            }
+            _rows[4]!.text = $"Next expressions  >  {_expressionPage + 1}/{pages}";
+            _rows[5]!.text = "Back to buttons";
+            var available = (_expressionInput.Available & (1 << (int)button)) != 0;
+            _footer!.text = $"Current: {ExpressionLabel(binding.Expression)}\n" +
+                (!_expressionConfig.ExpressionsEnabled ? "Enable Expressions on the previous page to preview" :
+                    available ? "Press the assigned button to preview in the mirror" : "Button unavailable: check controller connection / input support");
+        }
+        else
+        {
+            _rows[0]!.text = $"Expressions: {(_expressionConfig.ExpressionsEnabled ? "ON" : "OFF")}";
+            for (var i = 0; i < 3; i++)
+            {
+                var candidate = (ExpressionButton)(_expressionHand * 3 + i);
+                var binding = GetExpressionBinding(candidate);
+                _rows[i + 1]!.text = $"{ExpressionControls.Label(candidate)}  >\n{ExpressionLabel(binding.Expression)}";
+                _rows[i + 1]!.fontSize = 24f;
+            }
+            _rows[4]!.text = $"Show {(_expressionHand == 0 ? "RIGHT" : "LEFT")} controller  >";
+            _rows[5]!.text = "Back to settings";
+            _footer!.text = "Hold = while pressed | Toggle = press again to release\nGame actions on assigned buttons also run";
+        }
+        _rows[6]!.text = "Close panel";
+    }
+
+    /// <summary>表情画面の押下を処理し、変更があれば保存要求を返します。</summary>
+    private PanelCommand HandleExpressionRow(int row)
+    {
+        if (_expressionConfig == null) return PanelCommand.None;
+        _expressionConfig.ExpressionBindings ??= new Dictionary<string, ExpressionBinding>();
+        _nextTextUpdate = 0f;
+        if (_expressionButton is { } button)
+        {
+            var binding = GetExpressionBinding(button);
+            if (row == 0)
+                _expressionConfig.ExpressionBindings[button.ToString()] = binding with { Toggle = !binding.Toggle };
+            else if (row is >= 1 and <= 3 && _visibleExpressions[row - 1] is { } id)
+                _expressionConfig.ExpressionBindings[button.ToString()] = binding with { Expression = id };
+            else
+            {
+                if (row == 4) _expressionPage = (_expressionPage + 1) % Math.Max(1, (ExpressionOptions().Count + 2) / 3);
+                if (row == 5) _expressionButton = null;
+                return PanelCommand.None;
+            }
+            return PanelCommand.ExpressionsChanged;
+        }
+        if (row == 0)
+        {
+            _expressionConfig.ExpressionsEnabled = !_expressionConfig.ExpressionsEnabled;
+            return PanelCommand.ExpressionsChanged;
+        }
+        if (row is >= 1 and <= 3)
+        {
+            _expressionButton = (ExpressionButton)(_expressionHand * 3 + row - 1);
+            _expressionPage = 0;
+        }
+        if (row == 4) _expressionHand = 1 - _expressionHand;
+        if (row == 5) _expressionScreen = false;
+        return PanelCommand.None;
     }
 
     /// <summary>
@@ -1102,6 +1234,9 @@ internal sealed class SettingsPanel
         _armedDeviceKey = null;
         _visualScreen = false;
         _armedRoleRow = -1;
+        _expressionScreen = false;
+        _expressionButton = null;
+        Array.Clear(_visibleExpressions);
         _dashboardPage = 0;
         _lastSamples.Clear();
         _closeHoldStart = -1f;

@@ -27,11 +27,15 @@ SynthRidersFullBody/
       └─ Il2CppAssemblies/
          ├─ Assembly-CSharp.dll
          ├─ Assembly-CSharp-firstpass.dll
+         ├─ Il2CppVRM.dll
+         ├─ Il2CppVRM10.dll
          ├─ UnityEngine.CoreModule.dll
          └─ ...
 ```
 
 この配置では次だけでビルドできます。
+
+v0.51.0の表情操作は `Il2CppVRM.dll` と `Il2CppVRM10.dll` も参照します。足りない場合はゲームPCで生成された `Il2CppAssemblies` フォルダー全体をコピーしてください。
 
 ```powershell
 dotnet build .\SynthRidersFullBody.sln -c Release

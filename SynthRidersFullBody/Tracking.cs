@@ -634,6 +634,34 @@ internal sealed class Tracking
         leftTrigger = Trigger(_uiLeft); rightTrigger = Trigger(_uiRight);
         trigger = leftTrigger || rightTrigger;
     }
+
+    /// <summary>手首割り当てを優先して、表情操作用の左右ボタンを同じデバイスから取得します。</summary>
+    public ExpressionInput ReadExpressionButtons()
+    {
+        ResolveControllers();
+        var left = ExpressionButtons(_uiLeft);
+        var right = ExpressionButtons(_uiRight);
+        return new ExpressionInput(left.Pressed | (right.Pressed << 3),
+            left.Available | (right.Available << 3), $"{_uiLeft?.Key}|{_uiRight?.Key}");
+    }
+
+    /// <summary>指定個体の主・副・グリップボタンを読み取り、未対応入力と未押下を区別します。</summary>
+    private (int Pressed, int Available) ExpressionButtons(TrackingDevice? device)
+    {
+        if (device == null || device.Kind != "Controller" || !HasRawPose(device)) return default;
+        if (device.Source == "SteamVR") return _steamVr.ExpressionButtons(device.Id);
+        var xr = _xrDevices.FirstOrDefault(d => d.deviceId.ToString() == device.Id);
+        if (!xr.isValid) return default;
+        var available = 0;
+        var pressed = 0;
+        if (xr.TryGetFeatureValue(CommonUsages.primaryButton, out bool primary))
+        { available |= 1; if (primary) pressed |= 1; }
+        if (xr.TryGetFeatureValue(CommonUsages.secondaryButton, out bool secondary))
+        { available |= 2; if (secondary) pressed |= 2; }
+        if (xr.TryGetFeatureValue(CommonUsages.gripButton, out bool grip))
+        { available |= 4; if (grip) pressed |= 4; }
+        return (pressed, available);
+    }
     /// <summary>
     /// 手首割り当てまたはUI用コントローラーの姿勢を、固定原点でワールド空間へ移します。
     /// </summary>

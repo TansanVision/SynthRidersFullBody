@@ -2,7 +2,7 @@ using MelonLoader;
 using Il2CppSynth.Avatars;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.50.0", "SynthRidersFullBody")]
+[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.51.0", "SynthRidersFullBody")]
 
 namespace SynthRidersFullBody;
 
@@ -21,6 +21,9 @@ public sealed class FullBodyMod : MelonMod
     private readonly AvatarRendering _avatarRendering = new();
     private readonly CaptureCameraGuide _captureCameraGuide = new();
     private readonly AvatarHmdVisibility _avatarHmdVisibility = new();
+    private readonly AvatarExpressions _expressions = new();
+    private ExpressionInput _expressionInput;
+    private float _retryExpressionsAt;
     private AvatarIK? _avatar;
     private float _calibrationEnd;
     private float _nextScan;
@@ -95,6 +98,7 @@ public sealed class FullBodyMod : MelonMod
     /// </summary>
     public override void OnDeinitializeMelon()
     {
+        ResetExpressions(true);
         _avatarRendering.Restore();
         _captureCameraGuide.Dispose();
         try { _avatar?.Dispose(); }
@@ -116,6 +120,7 @@ public sealed class FullBodyMod : MelonMod
     /// <param name="sceneName">MelonLoaderから通知されたシーン名。</param>
     public override void OnSceneWasLoaded(int buildIndex, string sceneName)
     {
+        ResetExpressions(true);
         _panel.CloseForSceneChange();
         _menuButton.ResetUi();
         _avatar?.HideTPosePreview();
@@ -142,6 +147,7 @@ public sealed class FullBodyMod : MelonMod
             var camera = FindHeadCamera();
             if (camera == null)
             {
+                ResetExpressions(false);
                 _panel.CloseForSceneChange();
                 _menuButton.Hide();
                 _avatar?.HideTPosePreview();
@@ -268,6 +274,7 @@ public sealed class FullBodyMod : MelonMod
                 _captureCameraGuide.Hide();
             }
 
+            PrepareExpressions();
             _tracking.ReadControllerTriggers(out var trigger,
                 out var leftTrigger, out var rightTrigger);
             // SourceLabel describes current HMD availability, not a change to
@@ -333,6 +340,7 @@ public sealed class FullBodyMod : MelonMod
                 try
                 {
                     _panel.SetCameraGuideDetails(_captureCameraGuide.Status, _captureCameraGuide.Location);
+                    _panel.SetExpressionContext(_config, _expressions, _expressionInput);
                     var command = _panel.Tick(camera, _tracking,
                         _avatar != null && _avatar.Animator != null && _avatar.Animator.gameObject.activeInHierarchy,
                         hasPoses, _config.Enabled,
@@ -380,6 +388,7 @@ public sealed class FullBodyMod : MelonMod
                 _lastPoseReady = hasPoses;
                 _hasPoseResult = true;
             }
+            UpdateExpressions();
             if (_calibrationEnd > 0f)
             {
                 if (!_panel.IsCalibrationScreen)
@@ -483,6 +492,7 @@ public sealed class FullBodyMod : MelonMod
         catch (Exception exception)
         {
             var error = $"{exception.GetType().Name}: {exception.Message}";
+            ResetExpressions(false);
             if (error != _lastTrackingError || Time.unscaledTime >= _nextTrackingErrorLog)
             {
                 LoggerInstance.Error($"Tracking update failed; retrying: {exception}");
@@ -525,6 +535,10 @@ public sealed class FullBodyMod : MelonMod
         if (_tracking == null || _config == null || command == PanelCommand.None) return;
         switch (command)
         {
+            case PanelCommand.ExpressionsChanged:
+                ResetExpressions(false);
+                TrySaveConfig();
+                return;
             case PanelCommand.AssignmentChanged: break;
             case PanelCommand.Recalibrate:
                 OpenCalibration(camera);
@@ -582,6 +596,50 @@ public sealed class FullBodyMod : MelonMod
                 LoggerInstance.Msg($"Assigned {TrackerRoles.Label(role)}: {_tracking.AssignmentLabel(role)}.");
         }
         TrySaveConfig();
+    }
+
+    /// <summary>表情APIと同じ個体の入力を準備し、失敗を全身追跡から隔離します。</summary>
+    private void PrepareExpressions()
+    {
+        if (_tracking == null || Time.unscaledTime < _retryExpressionsAt) return;
+        try
+        {
+            _expressions.Refresh(_avatarHmdVisibility.GetActiveAvatarRoot() ?? _avatar?.Animator?.gameObject);
+            _expressionInput = _tracking.ReadExpressionButtons();
+        }
+        catch (Exception exception) { ExpressionError(exception); }
+    }
+
+    /// <summary>校正や他の設定画面を除き、ボタンによる表情を更新します。フルトラ校正は不要です。</summary>
+    private void UpdateExpressions()
+    {
+        if (_config == null || Time.unscaledTime < _retryExpressionsAt) return;
+        try
+        {
+            _expressions.Update(_expressionInput, _config,
+                _calibrationEnd <= 0 && (!_panel.IsOpen || _panel.IsExpressionScreen));
+        }
+        catch (Exception exception) { ExpressionError(exception); }
+    }
+
+    /// <summary>表情処理の失敗を記録し、参照を解放して一定時間後に再検出します。</summary>
+    private void ExpressionError(Exception exception)
+    {
+        LoggerInstance.Warning($"Expression control unavailable; retrying: {exception.GetType().Name}: {exception.Message}");
+        ResetExpressions(true);
+        _retryExpressionsAt = Time.unscaledTime + 5f;
+    }
+
+    /// <summary>表情を解除します。破棄済みアバターの例外を他の機能へ伝えません。</summary>
+    private void ResetExpressions(bool releaseAvatar)
+    {
+        try
+        {
+            if (releaseAvatar) _expressions.Dispose();
+            else _expressions.Reset();
+        }
+        catch { /* Avatar teardown can destroy the native expression component first. */ }
+        _expressionInput = default;
     }
 
     /// <summary>
