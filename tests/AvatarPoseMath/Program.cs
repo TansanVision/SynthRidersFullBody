@@ -2,6 +2,7 @@ using System.Numerics;
 using SynthRidersFullBody;
 
 var checks = 0;
+KneeReferenceTests.Run(Check);
 // Heading must remain stable across the old projected-forward singularity at 90°.
 foreach (var heading in new[] { -170f, -90f, 0f, 45f, 170f })
 {
@@ -292,11 +293,18 @@ foreach (var invalidHead in new[] { Vector3.Zero, new Vector3(0, -1, 0), new Vec
 Check(!AvatarScaleMath.TryFit(Vector3.Zero, Vector3.One, new(0, 2, 0), Vector3.Zero, Vector3.Zero,
     new(0, 1.7f, 0), Vector3.Zero, new(0, 0.4f, 0), out _, out _, out _), "A lifted foot changed calibration size.");
 CameraResolverTests.Run(Check);
+CameraGuideDrawTests.Run(Check);
+AvatarHmdVisibilityTests.Run(Check);
 ToeRotationTests.Run(Check);
 CalibrationPoseTests.Run(Check);
 UltimateTrackerCorrectionTests.Run(Check);
 ExpressionControlTests.Run(Check);
 AvatarExpressionTests.Run(Check);
+UiLocalizationTests.Run(Check);
+PanelInteractionTests.Run(Check);
+CalibrationFlowTests.Run(Check);
+AssignmentDraftTests.Run(Check);
+UiAppearanceTests.Run(Check);
 Console.WriteLine($"Pose math / tracker assignment / camera compatibility / scene recovery / UI layout / size fit / expressions tests passed ({checks} checks).");
 
 void Check(bool passed, string message)

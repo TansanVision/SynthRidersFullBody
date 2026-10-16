@@ -71,7 +71,7 @@ internal sealed class CalibrationDirectionGuide
         if (_forward.sqrMagnitude < 0.01f) _forward = Vector3.forward;
         _sign!.transform.SetPositionAndRotation(_origin + _forward * 1.2f,
             Quaternion.LookRotation(_forward, Vector3.up));
-        _label!.text = UsesMirror ? "FRONT = MIRROR" : "FRONT = THIS ARROW";
+        UiLocalization.Bind(_label!, UsesMirror ? "FRONT = MIRROR" : "FRONT = THIS ARROW");
         return _forward;
     }
 
@@ -103,9 +103,9 @@ internal sealed class CalibrationDirectionGuide
         }
         _floor.SetActive(visible && _hasFloor);
         _countdown!.text = countdown >= 0f
-            ? $"{Mathf.CeilToInt(countdown)}   {(tPose ? "HOLD T-POSE" : "HOLD STILL")}" : "FACE THIS WAY";
-        _hint!.text = countdown >= 0f && !assessment.Ready ? assessment.Status :
-            countdown >= 0f && assessment.Warning != null ? "WARNING: " + assessment.Warning : "LOOK AT THE DOT";
+            ? $"{Mathf.CeilToInt(countdown)}   {UiText.Get(tPose ? "HOLD T-POSE" : "HOLD STILL")}" : UiText.Get("FACE THIS WAY");
+        _hint!.text = countdown >= 0f && !assessment.Ready ? UiText.Status(assessment.Status) :
+            countdown >= 0f && assessment.Warning != null ? UiText.Format("WARNING: {0}", UiText.Status(assessment.Warning)) : UiText.Get("LOOK AT THE DOT");
         var color = countdown >= 0f && (!assessment.Ready || assessment.Warning != null) ? new Color(1f, 0.65f, 0.2f) :
             new Color(0.06f, 0.87f, 0.94f);
         _focus!.color = color;
@@ -182,8 +182,8 @@ internal sealed class CalibrationDirectionGuide
         var right = VrUi.Image(_floor, "ArrowRight", new Vector2(22f, 140f), new Vector2(45f, 90f), cyan);
         left.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -45f);
         right.rectTransform.localRotation = Quaternion.Euler(0f, 0f, 45f);
-        VrUi.Text(_floor, "Front", new Vector2(380f, 60f), new Vector2(0f, -175f),
-            44f, Color.white, TextAlignmentOptions.Center).text = "FRONT";
+        UiLocalization.Bind(VrUi.Text(_floor, "Front", new Vector2(380f, 60f), new Vector2(0f, -175f),
+            44f, Color.white, TextAlignmentOptions.Center), "FRONT");
         _sign = VrUi.CreateCanvas("SynthRidersFullBody.CalibrationFrontSign", new Vector2(760f, 300f), 0.001f);
         VrUi.Image(_sign, "Background", new Vector2(760f, 300f), Vector2.zero,
             new Color(0.10f, 0.065f, 0.22f, 0.85f));
@@ -195,6 +195,7 @@ internal sealed class CalibrationDirectionGuide
             32f, Color.white, TextAlignmentOptions.Center);
         _hint = VrUi.Text(_sign, "Posture", new Vector2(730f, 55f), new Vector2(0f, -105f),
             23f, Color.white, TextAlignmentOptions.Center);
+        _hint.enableWordWrapping = true;
         _progress = VrUi.Image(_sign, "Progress", new Vector2(0f, 5f), new Vector2(0f, -145f), cyan);
         Hide();
     }

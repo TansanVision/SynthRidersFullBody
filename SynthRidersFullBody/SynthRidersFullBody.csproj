@@ -21,8 +21,10 @@
     <Error Condition="'$(UnityAssembliesDir)' == ''" Text="Unity reference assemblies were not found under $(GameDir)\MelonLoader. Install MelonLoader and launch Synth Riders once; then check for Il2CppAssemblies or Managed." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.CoreModule.dll')" Text="UnityEngine.CoreModule.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.AnimationModule.dll')" Text="UnityEngine.AnimationModule.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.AudioModule.dll')" Text="UnityEngine.AudioModule.dll is missing. Copy the game's complete generated Il2CppAssemblies folder; UI sound uses its audio references." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.XRModule.dll')" Text="UnityEngine.XRModule.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.TextRenderingModule.dll')" Text="UnityEngine.TextRenderingModule.dll is missing from $(UnityAssembliesDir)." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.TextCoreFontEngineModule.dll')" Text="UnityEngine.TextCoreFontEngineModule.dll is missing. Copy the game's complete generated Il2CppAssemblies folder; localized UI fonts use its font engine." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.UI.dll')" Text="UnityEngine.UI.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Unity.TextMeshPro.dll')" Text="Unity.TextMeshPro.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Assembly-CSharp.dll')" Text="The game's generated Assembly-CSharp.dll is missing from $(UnityAssembliesDir)." />
@@ -35,6 +37,7 @@
     <Reference Include="$(UnityAssembliesDir)\Il2CppVRM.dll" Condition="Exists('$(UnityAssembliesDir)\Il2CppVRM.dll')"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\Il2CppVRM10.dll" Condition="Exists('$(UnityAssembliesDir)\Il2CppVRM10.dll')"><Private>false</Private></Reference>
     <EmbeddedResource Include="OpenVrLicense.txt" />
+    <EmbeddedResource Include="Localization/*.json" LogicalName="SynthRidersFullBody.Localization.%(Filename)%(Extension)" />
     <None Update="OpenVrLicense.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
@@ -45,9 +48,11 @@
     <Reference Include="$(UnityAssembliesDir)\UnityEngine.CoreModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.CoreModule.dll')"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\UnityEngine.AnimationModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.AnimationModule.dll')"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\UnityEngine.PhysicsModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.PhysicsModule.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\UnityEngine.AudioModule.dll"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\UnityEngine.XRModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.XRModule.dll')"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\Unity.InputSystem.dll" Condition="Exists('$(UnityAssembliesDir)\Unity.InputSystem.dll')"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\UnityEngine.TextRenderingModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.TextRenderingModule.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\UnityEngine.TextCoreFontEngineModule.dll"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\UnityEngine.UIModule.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.UIModule.dll')"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\UnityEngine.UI.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.UI.dll')"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\Unity.TextMeshPro.dll" Condition="Exists('$(UnityAssembliesDir)\Unity.TextMeshPro.dll')"><Private>false</Private></Reference>

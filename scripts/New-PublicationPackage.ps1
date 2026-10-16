@@ -128,6 +128,7 @@ $documentationFiles = @(
     'docs/BUILDING.md',
     'docs/PUBLISHING.md',
     'docs/DEVELOPMENT_NOTES.md',
+    'docs/DEVELOPMENT_BACKLOG.md',
     'docs/ULTIMATE_TRACKER_INVESTIGATION.md',
     'LICENSE',
     'THIRD_PARTY_NOTICES.md'
@@ -147,6 +148,9 @@ foreach ($relativeDirectory in @('SynthRidersFullBody', 'tests/AvatarPoseMath', 
         ForEach-Object { "$relativeDirectory/$($_.Name)" })
 }
 $sourceFiles = @($sourceFiles | Sort-Object -Unique)
+foreach ($language in @('ja', 'fr', 'de', 'es', 'ko', 'zh')) {
+    $sourceFiles += "SynthRidersFullBody/Localization/$language.json"
+}
 foreach ($relativePath in $sourceFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $publicationRoot $relativePath) -PathType Leaf)) {
         throw "Required publication file is missing: $relativePath"

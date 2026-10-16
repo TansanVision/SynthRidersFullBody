@@ -3,10 +3,10 @@ using UnityEngine.Rendering;
 
 namespace SynthRidersFullBody;
 
-// A light skeleton overlay on the fixed T-pose, visible in the game's mirror.
+// A light skeleton overlay on the selected fixed pose, visible in the game's mirror.
 // No copied Animator, scripts, lights or additional reflection camera.
 /// <summary>
-/// 固定したアバターの骨格線と手の目印を表示し、Tポーズ合わせを補助します。
+/// 固定したアバターの骨格線と手の目印を表示し、Tポーズ・直立の姿勢合わせを補助します。
 /// </summary>
 internal sealed class CalibrationGhostGuide
 {

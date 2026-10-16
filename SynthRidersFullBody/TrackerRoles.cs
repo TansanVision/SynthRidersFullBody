@@ -75,6 +75,8 @@ public sealed record TrackerBinding
     /// 現在の起動中だけ有効なデバイス番号です。JSONには保存しません。
     /// </summary>
     [JsonIgnore] public string DeviceId { get; init; } = "";
+    /// <summary>シリアルなし個体の再接続を識別する実行中だけの接続世代です。</summary>
+    [JsonIgnore] public long SessionId { get; init; }
 
     /// <summary>
     /// シリアルを優先し、なければ取得元と一時番号を用いてデバイスの一致を判定します。
@@ -82,12 +84,13 @@ public sealed record TrackerBinding
     /// <param name="source">取得元APIの識別名。</param>
     /// <param name="serial">取得したデバイスのシリアル番号。</param>
     /// <param name="id">取得元APIで使用するデバイス番号の文字列。</param>
+    /// <param name="sessionId">シリアルなし個体の現在の接続世代。</param>
     /// <returns>指定デバイスがこの割り当てに一致する場合はtrue。</returns>
-    public bool Matches(string source, string serial, string id) =>
+    public bool Matches(string source, string serial, string id, long sessionId = 0) =>
         (string.IsNullOrEmpty(Source) || Source == source) &&
         (!string.IsNullOrWhiteSpace(Serial)
             ? string.Equals(Serial, serial, StringComparison.OrdinalIgnoreCase)
-            : DeviceId.Length > 0 && DeviceId == id);
+            : DeviceId.Length > 0 && DeviceId == id && (SessionId == 0 || SessionId == sessionId));
 
     /// <summary>
     /// 2つの割り当てが同じ物理個体を指すかを調べます。

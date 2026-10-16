@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.XR;
 using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.XR;
@@ -92,11 +92,13 @@ internal sealed record TrackingDevice(string Source, string Id, string Name, str
     /// <summary>
     /// 取得元とシリアル、または番号と名称から作る一覧内の識別キーです。
     /// </summary>
-    public string Key => $"{Source}:{(Serial.Length > 0 ? Serial : Id + ":" + Name)}";
+    public string Key => $"{Source}:{(Serial.Length > 0 ? Serial.ToUpperInvariant() : Id + ":" + Name)}";
+    /// <summary>接続の切り替わりを識別する実行中の世代です。</summary>
+    public long SessionId { get; init; }
     /// <summary>
     /// この個体を役割へ割り当てるための設定値を生成します。
     /// </summary>
-    public TrackerBinding Binding => new() { Source = Source, Serial = Serial, DeviceId = Id };
+    public TrackerBinding Binding => new() { Source = Source, Serial = Serial, DeviceId = Id, SessionId = SessionId };
 }
 /// <summary>
 /// デバイス情報と取得元の追跡空間における生姿勢・追跡可否をまとめた表示用データです。
@@ -134,6 +136,7 @@ internal sealed class Tracking
 {
     private readonly List<InputDevice> _xrDevices = new();
     private readonly List<TrackingDevice> _devices = new();
+    private readonly AssignmentDevices _assignmentDevices = new();
     private readonly Dictionary<string, TrackingSpaceAnchor> _anchors = new();
     private readonly Dictionary<string, UltimateTrackerCorrection> _ultimateCorrections = new();
     private readonly Dictionary<TrackerRole, Pose> _rolePoses = new();
@@ -185,6 +188,16 @@ internal sealed class Tracking
     /// <param name="role">対象の身体部位。</param>
     /// <returns>設定が存在する場合はtrue。接続・追跡の成功は意味しません。</returns>
     public bool HasAssignment(TrackerRole role) => _config.RoleBindings.ContainsKey(role.ToString());
+
+    /// <summary>主足の選択規則を維持し、アバター・腰・左右足と追加部位の準備状態を返します。</summary>
+    public CalibrationReadiness GetCalibrationReadiness(bool avatarReady, bool worldPosesReady) =>
+        new(avatarReady, CalibrationState(TrackerRole.Waist), CalibrationState(PrimaryFoot(true)),
+            CalibrationState(PrimaryFoot(false)), worldPosesReady, MissingAssignedPose());
+
+    /// <summary>直近フレームの姿勢を使用して、未割り当てと追跡喪失・重複を区別します。</summary>
+    private CalibrationDeviceState CalibrationState(TrackerRole role) =>
+        CalibrationReadiness.Device(HasAssignment(role), _rolePoses.ContainsKey(role),
+            TrackerRoles.IsConflicted(_config.RoleBindings, role));
     /// <summary>
     /// 重複を除外し、保存した割り当てに一致する現在のデバイスを取得します。
     /// </summary>
@@ -194,23 +207,37 @@ internal sealed class Tracking
     {
         if (TrackerRoles.IsConflicted(_config.RoleBindings, role)) return null;
         if (!_config.RoleBindings.TryGetValue(role.ToString(), out var binding)) return null;
-        return _devices.FirstOrDefault(d => binding.Matches(d.Source, d.Serial, d.Id));
+        // Legacy bindings without a source retain SteamVR-first API selection.
+        // Duplicate endpoints within an API are excluded by the connection catalog.
+        return _devices.FirstOrDefault(d => _assignmentDevices.Find(d.Key) != null &&
+            binding.Matches(d.Source, d.Serial, d.Id, d.SessionId));
     }
-    /// <summary>
-    /// 選択した個体を部位へ割り当てるか解除し、旧形式のシリアルと入力選択キャッシュを更新します。
-    /// </summary>
-    /// <param name="role">対象の身体部位。</param>
-    /// <param name="deviceKey">選択した個体の識別キー。nullなら部位の割り当てを解除します。</param>
-    public void Assign(TrackerRole role, string? deviceKey)
+    /// <summary>現在の割り当てを変更せず、確認用の編集案を作成します。</summary>
+    public AssignmentDraft CreateAssignmentDraft() => new(_config.RoleBindings);
+
+    /// <summary>現在接続中の一意な個体を、接続世代を含めて取得します。</summary>
+    public AssignmentDevice? AssignmentDevice(string key) => _assignmentDevices.Find(key);
+
+    /// <summary>選択時と同じ接続個体から有効な姿勢を取得できるかを確認します。</summary>
+    public bool AssignmentDeviceAvailable(AssignmentDevice device) => _assignmentDevices.Contains(device) &&
+        HasRawPose(_devices.FirstOrDefault(d => d.Key == device.Key));
+
+    /// <summary>適用前の検証結果を返します。nullなら設定と接続世代が一致しています。</summary>
+    public string? AssignmentError(AssignmentDraft draft) => draft.Validate(_config.RoleBindings, AssignmentDeviceAvailable);
+
+    /// <summary>確定した変更案だけを一括適用し、実際に変更した場合だけ互換設定と入力を更新します。</summary>
+    public AssignmentApplyResult ApplyAssignments(AssignmentDraft draft)
     {
-        var device = deviceKey == null ? null : _devices.FirstOrDefault(d => d.Key == deviceKey);
-        if (deviceKey != null && device == null) { AssignmentStatus = "Device disconnected; select it again"; return; }
-        TrackerRoles.Assign(_config.RoleBindings, role, device?.Binding);
-        SyncLegacySerials();
-        _controllerFrame = -1;
-        AssignmentStatus = device == null ? $"{TrackerRoles.Label(role)} cleared" :
-            $"{TrackerRoles.Label(role)} = {device.Serial} ({device.Source} #{device.Id})" +
-            (device.Serial.Length == 0 ? " | No serial: this session only" : "");
+        var result = draft.Apply(_config.RoleBindings, AssignmentDeviceAvailable);
+        if (result == AssignmentApplyResult.Applied)
+        {
+            SyncLegacySerials();
+            _controllerFrame = -1;
+            AssignmentStatus = "Assignments applied. Recalibration required.";
+        }
+        else AssignmentStatus = result == AssignmentApplyResult.Unchanged ? "No assignment changes." :
+            AssignmentError(draft) ?? "Device disconnected or not tracked. Cancel and select again.";
+        return result;
     }
     /// <summary>
     /// 現在の腰・左右足首の割り当てを、互換用の旧シリアル設定へ反映します。
@@ -277,17 +304,21 @@ internal sealed class Tracking
         }
         try { _steamVr.Refresh(); _devices.InsertRange(0, _steamVr.Devices); }
         catch (Exception exception) { lines.Add($"SteamVR unavailable: {exception.Message}"); }
+        _assignmentDevices.Update(_devices.Select(d => new AssignmentDevice(d.Key, d.Name, d.Binding)));
+        for (var i = 0; i < _devices.Count; i++)
+            _devices[i] = _devices[i] with { SessionId = _assignmentDevices.Find(_devices[i].Key)?.Session ?? 0 };
+        _devices.Sort((a, b) => StringComparer.Ordinal.Compare(a.Key, b.Key));
         DeviceSummary = $"Unity XR devices:\n{string.Join(Environment.NewLine, lines)}\nSteamVR devices:\n{_steamVr.DeviceSummary}";
         _controllerFrame = -1;
         return HasRawPose(Assigned(TrackerRole.Waist)) &&
             HasRawPose(Assigned(PrimaryFoot(true))) && HasRawPose(Assigned(PrimaryFoot(false)));
     }
     /// <summary>
-    /// 鏡方向と現在位置から空き部位の候補を提案し、曖昧でない未使用個体だけを割り当てます。
+    /// 鏡方向と現在位置から空き部位の候補を提案します。実設定は変更しません。
     /// </summary>
     /// <param name="camera">ゲーム内のHMD視点として使用するカメラ。</param>
     /// <remarks>明示的なAUTO操作から呼び出します。既存の割り当てと使用中の個体を保ち、追跡中に自動で役割を入れ替えません。</remarks>
-    public void AutoAssign(Camera camera)
+    public AssignmentDraft ProposeAutoAssignment(Camera camera)
     {
         // Explicit user action only. Existing choices are never overwritten.
         var forward = Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up).normalized;
@@ -301,7 +332,8 @@ internal sealed class Tracking
             }
         }
         catch { /* Without a native mirror, the user must face forward for AUTO. */ }
-        var count = 0;
+        var draft = CreateAssignmentDraft();
+        var previewCorrections = new Dictionary<string, UltimateTrackerCorrection>(_ultimateCorrections);
         foreach (var source in new[] { "SteamVR", "Unity XR" })
         {
             if (!RawHead(source, out var head)) continue;
@@ -312,7 +344,7 @@ internal sealed class Tracking
                 HasRawPose(d)).Select(d =>
             {
                 TryRaw(d, out var pose);
-                pose = CorrectUltimatePose(d, pose, anchor, camera);
+                pose = CorrectUltimatePose(d, pose, anchor, camera, previewCorrections);
                 return new BodyCandidate(d.Key, new(pose.Position.x, pose.Position.y, pose.Position.z));
             });
             var suggested = AutoBodyAssignment.Suggest(candidates,
@@ -320,19 +352,17 @@ internal sealed class Tracking
             foreach (var entry in suggested)
             {
                 var device = _devices.First(d => d.Key == entry.Value);
-                if (HasAssignment(entry.Key) || _config.RoleBindings.Values.Any(b => b.SameDevice(device.Binding))) continue;
+                if (draft.Proposed.ContainsKey(entry.Key.ToString()) || draft.Proposed.Values.Any(b => b.SameDevice(device.Binding))) continue;
                 // A single remaining sensor is not enough evidence to rename an
                 // explicitly configured toe-only foot to an ankle.
                 if (entry.Key == TrackerRole.LeftFoot && HasAssignment(TrackerRole.LeftToes) &&
                     !suggested.ContainsKey(TrackerRole.LeftToes) ||
                     entry.Key == TrackerRole.RightFoot && HasAssignment(TrackerRole.RightToes) &&
                     !suggested.ContainsKey(TrackerRole.RightToes)) continue;
-                Assign(entry.Key, device.Key);
-                count++;
+                if (AssignmentDevice(device.Key) is { } candidate) draft.Set(entry.Key, candidate);
             }
         }
-        AssignmentStatus = count > 0 ? $"AUTO filled {count} empty roles. Check each device; correct manually." :
-            "No clear empty waist/foot candidates. Face mirror, feet apart; or assign manually.";
+        return draft;
     }
     /// <summary>
     /// 現在の一覧から、識別情報と各APIの生姿勢を取得します。
@@ -522,6 +552,7 @@ internal sealed class Tracking
     /// <param name="raw">取得元の未補正姿勢。</param>
     /// <param name="anchor">追跡空間からゲーム空間への変換。最初の鉛直軸取得に使用します。</param>
     /// <param name="camera">直立校正時の頭の位置を与えるHMDカメラ。位置合わせの初回だけ参照します。</param>
+    /// <param name="previewCorrections">提案表示専用の補正キャッシュ。指定時は実追跡の基準を変更しません。</param>
     /// <returns>補正後の生空間姿勢。無効時や対象外の機器では入力をそのまま返します。</returns>
     /// <remarks>
     /// 対象の腰があれば、その水平位置をHMDの真下へ一度だけ合わせます。
@@ -529,10 +560,12 @@ internal sealed class Tracking
     /// 対象の腰を取得できない場合は、最初の対象機器を中心に回転だけを適用します。
     /// 再校正ではClearWorldAnchorで取り直し、シーン復帰時のCaptureWorldAnchorでは保持します。
     /// </remarks>
-    private Pose CorrectUltimatePose(TrackingDevice device, Pose raw, TrackingSpaceAnchor anchor, Camera camera)
+    private Pose CorrectUltimatePose(TrackingDevice device, Pose raw, TrackingSpaceAnchor anchor, Camera camera,
+        IDictionary<string, UltimateTrackerCorrection>? previewCorrections = null)
     {
         if (!_config.UltimateTrackerRotate180 || !IsUltimateTracker(device)) return raw;
-        if (!_ultimateCorrections.TryGetValue(device.Source, out var correction))
+        var corrections = previewCorrections ?? _ultimateCorrections;
+        if (!corrections.TryGetValue(device.Source, out var correction))
         {
             var pivot = raw.Position;
             var waist = Assigned(TrackerRole.Waist);
@@ -547,7 +580,7 @@ internal sealed class Tracking
                     TPoseCalibration.ToNumerics(pivot), TPoseCalibration.ToNumerics(head), up);
             }
             correction = UltimateTrackerCorrection.Create(TPoseCalibration.ToNumerics(pivot), up, destination);
-            _ultimateCorrections[device.Source] = correction;
+            corrections[device.Source] = correction;
         }
         var q = raw.Rotation;
         var corrected = correction.Apply(TPoseCalibration.ToNumerics(raw.Position), new(q.x, q.y, q.z, q.w));
@@ -633,6 +666,19 @@ internal sealed class Tracking
         ResolveControllers();
         leftTrigger = Trigger(_uiLeft); rightTrigger = Trigger(_uiRight);
         trigger = leftTrigger || rightTrigger;
+    }
+
+    /// <summary>ポインターとトリガーが使用する同じ個体へだけ、短いUI振動を送信します。</summary>
+    public void SendUiHaptic(bool left)
+    {
+        ResolveControllers();
+        var device = left ? _uiLeft : _uiRight;
+        if (device == null || device.Kind != "Controller" || !HasRawPose(device)) return;
+        if (device.Source == "SteamVR") { _steamVr.UiHaptic(device.Id); return; }
+        var xr = _xrDevices.FirstOrDefault(d => d.deviceId.ToString() == device.Id);
+        if (xr.isValid && xr.TryGetHapticCapabilities(out var capabilities) &&
+            capabilities.supportsImpulse && capabilities.numChannels > 0)
+            xr.SendHapticImpulse(0, .15f, .025f);
     }
 
     /// <summary>手首割り当てを優先して、表情操作用の左右ボタンを同じデバイスから取得します。</summary>

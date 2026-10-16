@@ -116,6 +116,14 @@ internal sealed class SteamVrTracking
             (state.ulButtonPressed & (1UL << (int)EVRButtonId.k_EButton_SteamVR_Trigger)) != 0;
     }
 
+    /// <summary>操作元のSteamVRコントローラーへ1回だけ1msの振動を返します。</summary>
+    public void UiHaptic(string id)
+    {
+        if (_system != null && uint.TryParse(id, out var index) &&
+            _system.IsTrackedDeviceConnected(index) && _system.GetTrackedDeviceClass(index) == ETrackedDeviceClass.Controller)
+            _system.TriggerHapticPulse(index, 0, 1000);
+    }
+
     /// <summary>選択したOpenVRコントローラーの主・副・グリップ入力を3ビットで取得します。</summary>
     /// <param name="id">コントローラーの現在のデバイス番号。</param>
     /// <returns>押下ビットと対応ボタンのビット。読み取れない場合は両方0です。</returns>

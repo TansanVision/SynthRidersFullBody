@@ -141,13 +141,24 @@ internal static class VrUi
                     text.font = font;
                     break;
                 }
-        text.fontSize = fontSize;
+        SetFontSize(text, fontSize);
         text.color = color;
         text.alignment = alignment;
         text.enableWordWrapping = false;
         text.overflowMode = TextOverflowModes.Ellipsis;
         text.raycastTarget = false;
+        text.richText = false;
+        UiLocalization.Register(text);
         return text;
+    }
+
+    /// <summary>翻訳が長い場合だけ最大20%縮小し、画面切り替え時も行ごとの基準サイズを保持します。</summary>
+    public static void SetFontSize(TMP_Text text, float size)
+    {
+        text.fontSize = size;
+        text.enableAutoSizing = true;
+        text.fontSizeMax = size;
+        text.fontSizeMin = size * 0.8f;
     }
 
     /// <summary>

@@ -31,6 +31,7 @@ internal sealed class AvatarMenuButton
     private GameObject? _root;
     private Image? _settingsBackground;
     private Image? _calibrationBackground;
+    private UiFocusFrame? _settingsFocus, _calibrationFocus;
     private bool _previousTrigger = true;
     private bool _previousLeftTrigger = true;
     private bool _previousRightTrigger = true;
@@ -45,21 +46,20 @@ internal sealed class AvatarMenuButton
     /// </summary>
     public string Placement { get; private set; } = "waiting for avatar menu";
     /// <summary>
-    /// 入口の方向とHMD位置から、詳細パネルを置くワールド姿勢を求めます。
+    /// 入口とHMDの位置を、詳細パネルの固定配置用に記録します。
     /// </summary>
     /// <param name="camera">ゲーム内のHMD視点として使用するカメラ。</param>
-    /// <returns>入口を基準にした配置。入口がなければnull。</returns>
-    public Pose? PanelPose(Camera camera)
+    /// <returns>開く時点の配置基準。入口がなければnull。</returns>
+    public PanelPlacement? PanelReference(Camera camera)
     {
         if (_root == null || !_root.activeSelf) return null;
         var eye = camera.transform.position;
         var entry = _root.transform.position;
-        var near = VrPanelLayout.DetailPosition(new(eye.x, eye.y, eye.z), new(entry.x, entry.y, entry.z),
-            _root.transform.localScale.x);
-        var position = new Vector3(near.X, near.Y, near.Z);
-        var forward = Vector3.ProjectOnPlane(position - eye, Vector3.up).normalized;
-        return new Pose(position, Quaternion.LookRotation(forward, Vector3.up));
+        return new(new(eye.x, eye.y, eye.z), new(entry.x, entry.y, entry.z), _root.transform.localScale.x);
     }
+
+    /// <summary>最後に入口を押した手です。視線操作では振動しません。</summary>
+    public UiHand ActivationHand { get; private set; }
 
     /// <summary>
     /// アバター選択画面の有効なアンカーが存在するかを確認します。
@@ -184,11 +184,14 @@ internal sealed class AvatarMenuButton
                 Vector3.Distance(_root.transform.position, camera.transform.position));
             _wasVisible = true;
         }
-        var gazeAction = useGaze ? HitAction(new Ray(camera.transform.position,
+        // Keep both entry buttons visible, but give the open panel exclusive input.
+        // The panel retains its release gate after closing, including two-hand presses.
+        var entryInputAllowed = !panel.BlocksEntryInput;
+        var gazeAction = entryInputAllowed && useGaze ? HitAction(new Ray(camera.transform.position,
             camera.transform.forward), panel) : AvatarMenuAction.None;
-        var leftAction = leftPointer.HasPose ? HitAction(new Ray(leftPointer.Pose.Position,
+        var leftAction = entryInputAllowed && leftPointer.HasPose ? HitAction(new Ray(leftPointer.Pose.Position,
             leftPointer.Pose.Rotation * Vector3.forward), panel) : AvatarMenuAction.None;
-        var rightAction = rightPointer.HasPose ? HitAction(new Ray(rightPointer.Pose.Position,
+        var rightAction = entryInputAllowed && rightPointer.HasPose ? HitAction(new Ray(rightPointer.Pose.Position,
             rightPointer.Pose.Rotation * Vector3.forward), panel) : AvatarMenuAction.None;
         var settingsFocused = gazeAction == AvatarMenuAction.Settings ||
             leftAction == AvatarMenuAction.Settings || rightAction == AvatarMenuAction.Settings;
@@ -204,9 +207,16 @@ internal sealed class AvatarMenuButton
                 : calibrationRequired
                     ? new Color(0.70f, 0.06f, 0.58f, 0.98f)
                     : new Color(0.34f, 0.14f, 0.56f, 0.98f);
-        if (rightClicked && rightAction != AvatarMenuAction.None) return rightAction;
-        if (leftClicked && leftAction != AvatarMenuAction.None) return leftAction;
-        return gazeClicked ? gazeAction : AvatarMenuAction.None;
+        _settingsFocus?.Show(settingsFocused);
+        _calibrationFocus?.Show(calibrationFocused);
+        ActivationHand = UiHand.None;
+        var action = AvatarMenuAction.None;
+        if (rightClicked && rightAction != AvatarMenuAction.None) { ActivationHand = UiHand.Right; action = rightAction; }
+        else if (leftClicked && leftAction != AvatarMenuAction.None) { ActivationHand = UiHand.Left; action = leftAction; }
+        else if (gazeClicked) action = gazeAction;
+        if (action == AvatarMenuAction.Settings) _settingsFocus?.Pulse();
+        else if (action == AvatarMenuAction.Calibrate) _calibrationFocus?.Pulse();
+        return action;
     }
 
     /// <summary>
@@ -284,19 +294,21 @@ internal sealed class AvatarMenuButton
         _settingsBackground = VrUi.Image(_root, "SettingsButton",
             new Vector2(470f, 100f), new Vector2(0f, 65f),
             new Color(0.23f, 0.13f, 0.48f, 0.98f));
+        _settingsFocus = new UiFocusFrame(_settingsBackground.gameObject, new(470, 100));
         VrUi.HexOutline(_root, "SettingsFrame", new Vector2(475f, 105f),
             new Vector2(0f, 65f), new Color(0.12f, 0.82f, 0.95f, 0.95f), 3f, 42f);
-        VrUi.Text(_root, "SettingsLabel", new Vector2(450f, 86f),
+        UiLocalization.Bind(VrUi.Text(_root, "SettingsLabel", new Vector2(450f, 86f),
             new Vector2(0f, 65f), 32f, Color.white,
-            TextAlignmentOptions.Center).text = "FULL BODY SETTINGS";
+            TextAlignmentOptions.Center), "FULL BODY SETTINGS");
         _calibrationBackground = VrUi.Image(_root, "CalibrationButton",
             new Vector2(470f, 100f), new Vector2(0f, -65f),
             new Color(0.70f, 0.06f, 0.58f, 0.98f));
+        _calibrationFocus = new UiFocusFrame(_calibrationBackground.gameObject, new(470, 100));
         VrUi.HexOutline(_root, "CalibrationFrame", new Vector2(475f, 105f),
             new Vector2(0f, -65f), new Color(1f, 0.40f, 0.89f, 0.95f), 3f, 42f);
-        VrUi.Text(_root, "CalibrationLabel", new Vector2(450f, 86f),
+        UiLocalization.Bind(VrUi.Text(_root, "CalibrationLabel", new Vector2(450f, 86f),
             new Vector2(0f, -65f), 32f, Color.white,
-            TextAlignmentOptions.Center).text = "CALIBRATE FULL BODY";
+            TextAlignmentOptions.Center), "CALIBRATE FULL BODY");
         _root.SetActive(false);
     }
 

@@ -52,6 +52,7 @@ internal sealed class AvatarIK
                 $"rootControlActive={rootController?.enabled}, " +
                 $"kneeGuides=({(_leftBendGoal != null ? "on" : "game/off")}," +
                 $"{(_rightBendGoal != null ? "on" : "game/off")}), " +
+                $"kneeReference=({_leftKneeDirectionReference},{_rightKneeDirectionReference}), " +
                 $"legEndpoints=({LeftLegEnd.name},{RightLegEnd.name}), " +
                 $"rootPosition={root?.position}, pelvisPosition={_hips.position}";
         }
@@ -244,6 +245,8 @@ internal sealed class AvatarIK
     private Vector3 _bodyForwardReference;
     private Vector3 _leftKneeDirectionReference;
     private Vector3 _rightKneeDirectionReference;
+    private Vector3 _lastLeftBend;
+    private Vector3 _lastRightBend;
     private Vector3 _leftLegAxisReference;
     private Vector3 _rightLegAxisReference;
     private Quaternion _lastPelvisYaw = Quaternion.identity;
@@ -728,6 +731,8 @@ internal sealed class AvatarIK
             $"post-solve feet error=({_leftFootErrorAfterSolve:0.000}/{_rightFootErrorAfterSolve:0.000})m, " +
             $"toe neutral correction=({_leftToeRotation.CorrectionDegrees:0.#}/{_rightToeRotation.CorrectionDegrees:0.#})deg, " +
             $"dual toes=({_additional.DualLeft}/{_additional.DualRight}), " +
+            $"knees=(left {KneeDiagnostics(_leftUpper, _leftLower, _leftFoot, _lastLeftBend)}; " +
+            $"right {KneeDiagnostics(_rightUpper, _rightLower, _rightFoot, _lastRightBend)}), " +
             $"left input/target travel=({Vector3.Distance(_lastLeftPose.Position, _leftTrackerReferencePosition):0.000}/" +
             $"{Vector3.Distance(_leftTarget.position, _leftTargetReferencePosition):0.000})m, " +
             $"right input/target travel=({Vector3.Distance(_lastRightPose.Position, _rightTrackerReferencePosition):0.000}/" +
@@ -938,6 +943,8 @@ internal sealed class AvatarIK
         var rightBend = FromNumerics(AvatarPoseMath.LegBend(
             ToNumerics(pelvisYaw * _rightLegAxisReference),
             ToNumerics(pelvisYaw * _rightKneeDirectionReference), ToNumerics(rightPosition - rightHip)));
+        _lastLeftBend = leftBend;
+        _lastRightBend = rightBend;
         if (_pelvisTarget == null) AttachIkTargets();
         if (_pelvisTarget != null && _leftTarget != null && _rightTarget != null &&
             _ik != null && _ik.enabled)
@@ -1078,15 +1085,26 @@ internal sealed class AvatarIK
     /// <param name="knee">膝の位置。ほかの関節位置と同じ座標系です。</param>
     /// <param name="foot">足首の位置。ほかの関節位置と同じ座標系です。</param>
     /// <param name="forward">入力位置と同じ座標系におけるユーザーまたはアバターの正面方向。</param>
-    /// <returns>膝の曲げ方向。射影が縮退する場合は指定正面方向。</returns>
+    /// <returns>正面を基準に、骨長比と曲げ方向の信頼度を確認した膝ガイド方向。</returns>
     private static Vector3 KneeDirection(Vector3 hip, Vector3 knee, Vector3 foot,
         Vector3 forward)
     {
-        var axis = foot - hip;
-        var bend = Vector3.ProjectOnPlane(knee - hip, axis);
-        if (bend.sqrMagnitude < 0.0004f)
-            bend = Vector3.ProjectOnPlane(forward, axis);
-        return bend.sqrMagnitude > 0.0001f ? bend.normalized : forward;
+        return FromNumerics(AvatarPoseMath.CalibrationKneeBend(
+            ToNumerics(hip), ToNumerics(knee), ToNumerics(foot), ToNumerics(forward)));
+    }
+
+    /// <summary>膝の屈曲角と、実際の曲げ方向が要求ガイドとどの程度一致するかを記録します。</summary>
+    private static string KneeDiagnostics(Transform hip, Transform knee, Transform ankle, Vector3 expected)
+    {
+        var upper = knee.position - hip.position;
+        var lower = ankle.position - knee.position;
+        var axis = ankle.position - hip.position;
+        var bend = Vector3.ProjectOnPlane(upper, axis);
+        var guide = Vector3.ProjectOnPlane(expected, axis);
+        var dot = bend.sqrMagnitude > 0.000001f && guide.sqrMagnitude > 0.000001f
+            ? Vector3.Dot(bend.normalized, guide.normalized).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+            : "straight";
+        return $"flex={Vector3.Angle(upper, lower):0.#}deg guideDot={dot}";
     }
 
     /// <summary>

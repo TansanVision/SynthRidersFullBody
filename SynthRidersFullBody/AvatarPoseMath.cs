@@ -9,6 +9,38 @@ namespace SynthRidersFullBody;
 internal static class AvatarPoseMath
 {
     /// <summary>
+    /// 直立基準の膝ガイドを求めます。ほぼ直線の脚や横・後方の張り出しを曲げ方向として増幅しません。
+    /// </summary>
+    /// <param name="hip">基準姿勢の股関節位置。</param>
+    /// <param name="knee">基準姿勢の膝位置。</param>
+    /// <param name="foot">基準姿勢の足首位置。</param>
+    /// <param name="forward">校正時のアバター正面方向。</param>
+    /// <returns>脚軸に直交し、正面から最大35度の基準方向。実際の膝トラッカー入力には使用しません。</returns>
+    public static Vector3 CalibrationKneeBend(Vector3 hip, Vector3 knee, Vector3 foot, Vector3 forward)
+    {
+        var axis = Direction(foot - hip, -Vector3.UnitY);
+        var front = Perpendicular(forward, axis);
+        var upper = knee - hip;
+        var projected = upper - axis * Vector3.Dot(upper, axis);
+        var upperLength = upper.Length();
+        if (!Finite(projected) || !float.IsFinite(upperLength) || upperLength < 0.000001f) return front;
+        // Use a length ratio, not the old fixed 2 cm threshold. Otherwise the
+        // same rest pose chooses a different knee direction after size fitting.
+        var ratio = projected.Length() / upperLength;
+        if (ratio <= 0.025f) return front;
+        var measured = Vector3.Normalize(projected);
+        var dot = Math.Clamp(Vector3.Dot(front, measured), -1f, 1f);
+        if (dot < 0.5f) return front; // Lateral/reversed rest geometry is not a flexion hint.
+        var side = measured - front * dot;
+        var angle = MathF.Min(MathF.Acos(dot), 35f * MathF.PI / 180f);
+        var limited = side.LengthSquared() < 0.000001f ? front :
+            front * MathF.Cos(angle) + Vector3.Normalize(side) * MathF.Sin(angle);
+        var trust = Math.Clamp((ratio - 0.025f) / 0.1f, 0f, 1f);
+        trust *= trust * (3f - 2f * trust);
+        return Direction(Vector3.Lerp(front, limited, trust), front);
+    }
+
+    /// <summary>
     /// 回転差からワールドY軸まわりの旋回を抽出し、前屈による向きの反転を避けます。
     /// </summary>
     /// <param name="delta">校正時から現在までの回転差。</param>

@@ -1,5 +1,6 @@
 using Il2Cpp;
 using Il2Cppcom.Kluge.XR.Utils;
+using Il2CppSynth.Avatars;
 using UnityEngine;
 
 namespace SynthRidersFullBody;
@@ -25,11 +26,21 @@ internal static class CaptureCameraResolver
     public static Camera? Find(Camera headset, out string status)
     {
         status = "No active capture camera; enable a third-person view in the game";
-        var currentOwner = OptionalMember.ReadStatic(typeof(MainCameraEnabler), "s_instance") as MainCameraEnabler;
-        foreach (var owner in Resources.FindObjectsOfTypeAll<MainCameraEnabler>()
-                     .OrderBy(o => o == currentOwner ? 0 : 1))
+        var mode = CurrentMode();
+        if (mode == "OFF") { status = "Game screen camera is OFF"; return null; }
+        if (mode is "FirstPerson" or "FirstPersonWide")
         {
-            if (owner == null || !owner.gameObject.scene.IsValid()) continue;
+            status = "First-person view selected; switch to a third-person view";
+            return null;
+        }
+        var currentOwner = OptionalMember.ReadStatic(typeof(MainCameraEnabler), "s_instance") as MainCameraEnabler;
+        var owners = currentOwner != null && currentOwner.gameObject.scene.IsValid() && currentOwner.gameObject.activeInHierarchy
+            ? new[] { currentOwner }
+            : Resources.FindObjectsOfTypeAll<MainCameraEnabler>()
+                .Where(o => o != null && o.gameObject.scene.IsValid() && o.gameObject.activeInHierarchy).ToArray();
+        var fallback = new List<Camera>();
+        foreach (var owner in owners)
+        {
             // This is the actual screen output selected by the game, including
             // its standard/swing/spectator/cinematic modes. It may be disabled
             // because ManualCameraRenderer calls Render() explicitly.
@@ -51,23 +62,36 @@ internal static class CaptureCameraResolver
                 }
                 if (Usable(selected, headset))
                 {
-                    status = $"Screen camera: {selected.name}";
-                    return selected;
+                    var expected = ModeMember(mode);
+                    var modeRoot = expected != null ? OptionalMember.Read(owner, expected) : null;
+                    // During a mode switch the old camera may remain active.
+                    // Prefer the requested mode when both references exist.
+                    if (modeRoot == null || Contains(modeRoot, selected.transform))
+                    {
+                        status = $"{mode ?? InferMode(owner, selected)}: {Identity(selected)}";
+                        return selected;
+                    }
                 }
             }
-            if (ActiveObject(OptionalMember.Read(owner, "OFF_CameraObject")))
+            if (mode == null && ActiveObject(OptionalMember.Read(owner, "OFF_CameraObject")))
             {
                 status = "Game screen camera is OFF";
                 return null;
             }
             // Older game versions may not expose currentScreenCamera.
-            foreach (var name in ThirdPersonObjects)
+            var modeMember = ModeMember(mode);
+            foreach (var name in modeMember != null ? new[] { modeMember } : ThirdPersonObjects)
             {
                 var candidate = CameraOf(OptionalMember.Read(owner, name));
                 if (!Usable(candidate, headset)) continue;
-                status = $"{name}: {candidate!.name}";
-                return candidate;
+                fallback.Add(candidate!);
             }
+        }
+        if (fallback.Count > 0) return UniqueCandidate(fallback, mode ?? "Third-person", out status);
+        if (mode != null && mode != "ThirdPersonCustom")
+        {
+            status = $"Waiting for {mode} camera";
+            return null;
         }
         foreach (var settings in Resources.FindObjectsOfTypeAll<CustomCameraSettings>())
         {
@@ -76,12 +100,58 @@ internal static class CaptureCameraResolver
             {
                 var camera = CameraOf(OptionalMember.Read(settings, member));
                 if (!Usable(camera, headset)) continue;
-                status = $"Custom camera: {camera!.name}";
-                return camera;
+                fallback.Add(camera!);
             }
         }
+        if (fallback.Count > 0) return UniqueCandidate(fallback, mode ?? "Custom", out status);
         return null;
     }
+
+    /// <summary>現在選択されている画面出力モードを、任意アクセサー経由で読み取ります。</summary>
+    internal static string? CurrentMode()
+    {
+        var value = OptionalMember.ReadStatic(typeof(Game_InfoProvider), "CurrentCamType") ??
+            OptionalMember.ReadStatic(typeof(AvatarLoader), "CurrentCamType");
+        var mode = value?.ToString();
+        return mode is "FirstPerson" or "FirstPersonWide" or "ThirdPerson" or "ThirdPersonSwing" or
+            "ThirdPersonCustom" or "Spectator" or "Cinematic" or "OFF" ? mode : null;
+    }
+
+    /// <summary>表示モードに対応するゲームのカメラルート名を返します。</summary>
+    private static string? ModeMember(string? mode) => mode switch
+    {
+        "ThirdPerson" => "ThirdPerson_CameraObject",
+        "ThirdPersonSwing" => "ThirdPersonSwing_CameraObject",
+        "ThirdPersonCustom" => "ThirdPersonCustom_CameraObject",
+        "Spectator" => "Spectator_CameraObject",
+        "Cinematic" => "Cinematic_CameraObject",
+        _ => null
+    };
+
+    /// <summary>モード取得ができない版では、出力カメラが属するルートから診断用の名前を得ます。</summary>
+    private static string InferMode(MainCameraEnabler owner, Camera camera)
+    {
+        foreach (var member in ThirdPersonObjects)
+            if (Contains(OptionalMember.Read(owner, member), camera.transform))
+                return member.Replace("_CameraObject", "");
+        return "Screen camera";
+    }
+
+    /// <summary>重複参照をまとめ、一意な候補だけを採用します。複数の有効候補から順番で推測しません。</summary>
+    private static Camera? UniqueCandidate(List<Camera> cameras, string mode, out string status)
+    {
+        var candidates = cameras.DistinctBy(c => c.GetInstanceID()).ToArray();
+        if (candidates.Length == 1)
+        {
+            status = $"{mode}: {Identity(candidates[0])}";
+            return candidates[0];
+        }
+        status = $"Waiting for selected camera ({mode}; {candidates.Length} candidates)";
+        return null;
+    }
+
+    /// <summary>同名でも切り替えを識別できる、カメラ名と実行中の個体IDを返します。</summary>
+    internal static string Identity(Camera? camera) => camera != null ? $"{camera.name} #{camera.GetInstanceID()}" : "none";
 
     /// <summary>
     /// カメラの祖先名とゲームのLIVラッパー参照から、LIV管理下かを調べます。
@@ -151,8 +221,13 @@ internal static class CaptureCameraResolver
         if (transform == null) return null;
         // Ignore inactive prefab/preview children; keep disabled Camera
         // components on active objects, which can be rendered manually.
+        Camera? candidate = null;
         foreach (var child in transform.GetComponentsInChildren<Camera>(true))
-            if (child != null && child.gameObject.activeInHierarchy) return child;
-        return null;
+        {
+            if (child == null || !child.gameObject.activeInHierarchy) continue;
+            if (candidate != null && candidate != child) return null;
+            candidate = child;
+        }
+        return candidate;
     }
 }

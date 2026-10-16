@@ -7,8 +7,14 @@
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../SynthRidersFullBody/PanelInteraction.cs" Link="PanelInteraction.cs" />
+    <Compile Include="../../SynthRidersFullBody/CalibrationFlow.cs" Link="CalibrationFlow.cs" />
+    <Compile Include="../../SynthRidersFullBody/UiText.cs" Link="UiText.cs" />
+    <Compile Include="../../SynthRidersFullBody/UiLocalization.cs" Link="UiLocalization.cs" />
+    <EmbeddedResource Include="../../SynthRidersFullBody/Localization/*.json" LogicalName="SynthRidersFullBody.Localization.%(Filename)%(Extension)" />
     <Compile Include="../../SynthRidersFullBody/ExpressionControls.cs" Link="ExpressionControls.cs" />
     <Compile Include="../../SynthRidersFullBody/AvatarExpressions.cs" Link="AvatarExpressions.cs" />
+    <Compile Include="../../SynthRidersFullBody/AvatarHmdVisibility.cs" Link="AvatarHmdVisibility.cs" />
     <Compile Include="../../SynthRidersFullBody/ModConfig.cs" Link="ModConfig.cs" />
     <Compile Include="../../SynthRidersFullBody/AvatarPoseMath.cs" Link="AvatarPoseMath.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibrationPoseCheck.cs" Link="CalibrationPoseCheck.cs" />
@@ -18,12 +24,14 @@
     <Compile Include="../../SynthRidersFullBody/RigidPoseOffset.cs" Link="RigidPoseOffset.cs" />
     <Compile Include="../../SynthRidersFullBody/OptionalMember.cs" Link="OptionalMember.cs" />
     <Compile Include="../../SynthRidersFullBody/TrackerRoles.cs" Link="TrackerRoles.cs" />
+    <Compile Include="../../SynthRidersFullBody/AssignmentDraft.cs" Link="AssignmentDraft.cs" />
     <Compile Include="../../SynthRidersFullBody/AutoBodyAssignment.cs" Link="AutoBodyAssignment.cs" />
     <Compile Include="../../SynthRidersFullBody/DualFootMath.cs" Link="DualFootMath.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibrationRecoveryMath.cs" Link="CalibrationRecoveryMath.cs" />
     <Compile Include="../../SynthRidersFullBody/VrPanelLayout.cs" Link="VrPanelLayout.cs" />
     <Compile Include="../../SynthRidersFullBody/AvatarScaleMath.cs" Link="AvatarScaleMath.cs" />
     <Compile Include="../../SynthRidersFullBody/CaptureCameraResolver.cs" Link="CaptureCameraResolver.cs" />
+    <Compile Include="../../SynthRidersFullBody/CameraGuideDraw.cs" Link="CameraGuideDraw.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibratedToeRotation.cs" Link="CalibratedToeRotation.cs" />
   </ItemGroup>
 </Project>

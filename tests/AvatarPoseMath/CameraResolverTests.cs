@@ -69,6 +69,64 @@ internal static class CameraResolverTests
         Resources.All.Clear();
         check(CaptureCameraResolver.Find(head, out status) == null && status.Contains("No active"),
             "Missing cameras did not produce an actionable status.");
+
+        // All modes can keep their objects active. A missing/stale current
+        // output must use the selected mode, never the first active camera.
+        third.transform.parent = null;
+        owner = new Current { currentScreenCamera = third, ThirdPerson_CameraObject = third.gameObject,
+            Spectator_CameraObject = new Camera("Cam").gameObject,
+            Cinematic_CameraObject = new Camera("Cam").gameObject,
+            ThirdPersonSwing_CameraObject = new Camera("Cam") { enabled = false }.gameObject };
+        Il2Cpp.MainCameraEnabler.s_instance = owner;
+        foreach (var (mode, expected) in new[] { ("Spectator", owner.Spectator_CameraObject),
+                     ("Cinematic", owner.Cinematic_CameraObject), ("ThirdPersonSwing", owner.ThirdPersonSwing_CameraObject) })
+        {
+            Il2Cpp.Game_InfoProvider.CurrentCamType = mode;
+            check(CaptureCameraResolver.Find(head, out status)?.gameObject == expected && status.Contains(mode),
+                $"{mode} selected the stale third-person output.");
+            owner.currentScreenCamera = null;
+            check(CaptureCameraResolver.Find(head, out _)?.gameObject == expected,
+                $"{mode} fallback selected a different active mode.");
+            owner.currentScreenCamera = third;
+        }
+        var spectator = owner.Spectator_CameraObject.GetComponentInChildren<Camera>(true)!;
+        var film = owner.Cinematic_CameraObject.GetComponentInChildren<Camera>(true)!;
+        check(CaptureCameraResolver.Identity(spectator) != CaptureCameraResolver.Identity(film),
+            "Same-name camera replacement would not change diagnostics.");
+        foreach (var mode in new[] { "OFF", "FirstPerson", "FirstPersonWide" })
+        {
+            Il2Cpp.Game_InfoProvider.CurrentCamType = mode;
+            check(CaptureCameraResolver.Find(head, out _) == null, $"{mode} selected an unused third-person camera.");
+        }
+        Il2Cpp.Game_InfoProvider.CurrentCamType = null;
+        owner.currentScreenCamera = null;
+        check(CaptureCameraResolver.Find(head, out status) == null && status.Contains("candidates"),
+            "Ambiguous active modes were resolved by enumeration order.");
+        Il2Cpp.MainCameraEnabler.s_instance = new Current();
+        check(CaptureCameraResolver.Find(head, out _) == null,
+            "A stale scene's manager supplied a camera when the current manager was waiting.");
+        Il2Cpp.MainCameraEnabler.s_instance = null;
+        Resources.All.Clear();
+        var closedSettings = new Custom { customCamera = third };
+        closedSettings.gameObject.activeInHierarchy = false;
+        Il2Cpp.Game_InfoProvider.CurrentCamType = "ThirdPersonCustom";
+        check(CaptureCameraResolver.Find(head, out _) == third,
+            "Closing the camera settings UI hid its independent output camera.");
+        Resources.All.Clear();
+        var ambiguousRoot = new GameObject("SpectatorRoot");
+        new Camera("Cam").transform.parent = ambiguousRoot.transform;
+        new Camera("Cam").transform.parent = ambiguousRoot.transform;
+        owner = new Current { Spectator_CameraObject = ambiguousRoot };
+        Il2Cpp.MainCameraEnabler.s_instance = owner;
+        Il2Cpp.Game_InfoProvider.CurrentCamType = "Spectator";
+        check(CaptureCameraResolver.Find(head, out _) == null,
+            "Multiple active child cameras were resolved by enumeration order.");
+        owner.currentScreenCamera = ambiguousRoot.GetComponentInChildren<Camera>(true);
+        check(CaptureCameraResolver.Find(head, out _) == owner.currentScreenCamera,
+            "Explicit current output was rejected just because its root has multiple cameras.");
+        Il2Cpp.MainCameraEnabler.s_instance = null;
+        Il2Cpp.Game_InfoProvider.CurrentCamType = null;
+        Resources.All.Clear();
     }
 
     private sealed class Current : Il2Cpp.MainCameraEnabler
@@ -76,6 +134,10 @@ internal static class CameraResolverTests
         public Camera? currentScreenCamera;
         public GameObject? FirstPerson_CameraObject;
         public GameObject? OFF_CameraObject;
+        public GameObject? ThirdPerson_CameraObject;
+        public GameObject? ThirdPersonSwing_CameraObject;
+        public GameObject? Spectator_CameraObject;
+        public GameObject? Cinematic_CameraObject;
     }
     private sealed class BrokenCurrent : Il2Cpp.MainCameraEnabler
     {
@@ -102,6 +164,9 @@ namespace UnityEngine
     }
     public class Component
     {
+        private static int _nextId;
+        private readonly int _id = ++_nextId;
+        public int GetInstanceID() => _id;
         internal static readonly List<Component> Instances = new();
         public GameObject gameObject { get; }
         public Transform transform => gameObject.transform;
@@ -115,6 +180,7 @@ namespace UnityEngine
     }
     public class GameObject
     {
+        public int GetInstanceID() => transform.GetInstanceID();
         public string name;
         public bool activeInHierarchy = true;
         public Scene scene { get; } = new();
@@ -149,6 +215,7 @@ namespace UnityEngine
         public bool stereoEnabled;
         public bool enabled = true;
         public CameraType cameraType;
+        public int cullingMask = -1;
         public Camera(string name) : base(new GameObject(name)) { }
     }
 }
@@ -156,5 +223,12 @@ namespace Il2Cpp
 {
     public class MainCameraEnabler : UnityEngine.Component { public static MainCameraEnabler? s_instance; }
     public class CustomCameraSettings : UnityEngine.Component { }
+    public static class Game_InfoProvider
+    {
+        public static object? CurrentCamType;
+        public static string? Language;
+        public static bool LanguageUnavailable;
+        public static string? CurrentLangString => LanguageUnavailable ? throw new MissingMethodException() : Language;
+    }
 }
 namespace Il2Cppcom.Kluge.XR.Utils { public class LivCameraWrapper : UnityEngine.Component { } }

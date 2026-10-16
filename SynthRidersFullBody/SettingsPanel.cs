@@ -33,6 +33,10 @@ internal enum PanelCommand
     /// 校正カウントダウンを開始する要求。
     /// </summary>
     StartCalibration,
+    /// <summary>準備確認から固定姿勢の選択へ進みます。</summary>
+    PrepareCalibration,
+    /// <summary>計測と固定姿勢を解除し、準備確認へ戻します。</summary>
+    CancelCalibration,
     /// <summary>
     /// TポーズとStandingを切り替える要求。
     /// </summary>
@@ -58,13 +62,17 @@ internal enum PanelCommand
     /// </summary>
     ToggleUltimateRotation,
     /// <summary>表情設定の変更を保存する要求。全身校正は無効化しません。</summary>
-    ExpressionsChanged
+    ExpressionsChanged,
+    /// <summary>UIの共通設定を保存します。</summary>
+    UiPreferencesChanged,
+    /// <summary>現在位置を基準に詳細パネルだけを置き直します。</summary>
+    RepositionUi
 }
 
 /// <summary>
 /// 固定位置の全身設定・校正・部位割り当て・描画設定とLIVE TRACKERSのUIを管理します。
 /// </summary>
-internal sealed class SettingsPanel
+internal sealed partial class SettingsPanel
 {
     private string _cameraGuideStatus = "";
     private string _cameraGuideLocation = "";
@@ -78,49 +86,48 @@ internal sealed class SettingsPanel
         _cameraGuideStatus = status;
         _cameraGuideLocation = location;
     }
-    private static readonly float[] RowY = { 214f, 139f, 64f, -11f, -86f, -161f, -236f };
     private static readonly Color PanelFill = new(0.10f, 0.065f, 0.22f, 0.97f);
-    private static readonly Color RowFill = new(0.085f, 0.12f, 0.26f, 0.97f);
     private static readonly Color Cyan = new(0.06f, 0.87f, 0.94f, 0.98f);
     private static readonly Color Pink = new(0.96f, 0.03f, 0.78f, 0.98f);
-    private static readonly Color Violet = new(0.49f, 0.18f, 0.91f, 0.98f);
-    private readonly TextMeshProUGUI?[] _rows = new TextMeshProUGUI?[7];
-    private readonly Image?[] _buttons = new Image?[7];
-    private readonly TextMeshProUGUI?[] _dashboardRows = new TextMeshProUGUI?[5];
-    private readonly Image?[] _dashboardCards = new Image?[5];
+    private readonly TextMeshProUGUI?[] _rows = new TextMeshProUGUI?[PanelControls.RowCount];
+    private readonly PanelControlState[] _controls = new PanelControlState[PanelControls.Count];
+    private readonly PanelControlView?[] _views = new PanelControlView?[PanelControls.Count];
+    private readonly PanelInputGate _input = new();
+    private readonly PanelNavigation _navigation = new();
+    private readonly CalibrationFlow _calibration = new();
+    private CalibrationReadiness _readiness;
+    private CalibrationStageView? _stageView;
+    private readonly TextMeshProUGUI?[] _dashboardRows = new TextMeshProUGUI?[3];
+    private readonly Image?[] _dashboardCards = new Image?[3];
     private readonly GameObject?[] _trackerMarkers = new GameObject?[3];
     private readonly GameObject?[] _avatarMarkers = new GameObject?[3];
     private readonly List<Material> _markerMaterials = new();
     private readonly Dictionary<string, (Pose Pose, float Time, float Speed, float Angular)> _lastSamples = new();
     private GameObject? _root;
     private GameObject? _dashboard;
-    private GameObject? _primaryFrame;
     private TextMeshProUGUI? _title;
     private TextMeshProUGUI? _status;
     private TextMeshProUGUI? _footer;
     private TextMeshProUGUI? _dashboardStatus;
     private TextMeshProUGUI? _dashboardNextText;
-    private Image? _dashboardNextBackground;
-    private TextMeshProUGUI? _dashboardVisualText;
-    private Image? _dashboardVisualBackground;
     private Image? _leftCursor;
     private Image? _rightCursor;
-    private bool _calibrationScreen;
+    private bool _calibrationScreen => _navigation.Current == PanelPage.Calibration;
     private Vector3 _calibrationForward = Vector3.forward;
     private readonly CalibrationDirectionGuide _directionGuide = new();
     private readonly CalibrationGhostGuide _ghostGuide = new();
-    private Pose? _panelPose;
     private float _countdownRemaining = -1f;
     private string _bodyStatus = "Body IK: waiting";
     private string _waistMotion = "";
     private TPoseAssessment _poseAssessment;
     private bool _tPoseMode = true;
-    private bool _roleScreen;
-    private bool _visualScreen;
-    private bool _expressionScreen;
+    private bool _roleScreen => _navigation.Current == PanelPage.Trackers;
+    private bool _visualScreen => _navigation.Current == PanelPage.Display;
+    private bool _expressionScreen => _navigation.Current == PanelPage.Expressions;
     private ExpressionButton? _expressionButton;
     private int _expressionHand;
     private int _expressionPage;
+    private int _expressionPages = 1;
     private ModConfig? _expressionConfig;
     private AvatarExpressions? _expressions;
     private ExpressionInput _expressionInput;
@@ -136,25 +143,12 @@ internal sealed class SettingsPanel
         _expressions = expressions;
         _expressionInput = input;
     }
-    private int _armedRoleRow = -1;
-    private float _armedRoleUntil;
-    private string? _armedDeviceKey;
     private TrackerRole? _selectedRole;
     private int _rolePage;
     private int _devicePage;
-    private readonly string?[] _visibleDeviceKeys = new string?[3];
     private int _dashboardPage;
     private int _dashboardPages = 1;
-    private string? _calibrationResult;
-    private string? _calibrationWarning;
     private string _waistHeightStatus = "";
-    private bool _calibrationSucceeded;
-    private bool _previousTrigger = true;
-    private bool _previousLeftTrigger = true;
-    private bool _previousRightTrigger = true;
-    private bool _inputArmed;
-    private float _closeHoldStart = -1f;
-    private float _emptyAreaHoldStart = -1f;
     private float _nextTextUpdate;
     private bool _reopenAfterReset;
 
@@ -162,14 +156,16 @@ internal sealed class SettingsPanel
     /// 詳細パネルが有効な状態で表示されているかを示します。
     /// </summary>
     public bool IsOpen => _root != null && _root.activeSelf;
+    /// <summary>詳細画面の操作や閉じた直後の押下を、背後の入口へ渡さないようにします。</summary>
+    public bool BlocksEntryInput => IsOpen || !_input.Armed;
     /// <summary>
     /// 開いている詳細パネルが校正画面かを示します。
     /// </summary>
-    public bool IsCalibrationScreen => IsOpen && _calibrationScreen && !_roleScreen && !_visualScreen;
+    public bool IsCalibrationScreen => IsOpen && _calibrationScreen;
     /// <summary>
     /// 現在の校正画面が成功結果を保持しているかを示します。
     /// </summary>
-    public bool IsCalibrationSucceeded => IsCalibrationScreen && _calibrationSucceeded;
+    public bool IsCalibrationSucceeded => IsCalibrationScreen && _calibration.Succeeded;
     /// <summary>
     /// 現在の校正モードがTポーズかを示します。
     /// </summary>
@@ -185,7 +181,9 @@ internal sealed class SettingsPanel
     /// <summary>
     /// 未完了の校正画面でアバターの固定姿勢を表示する必要があるかを示します。
     /// </summary>
-    public bool ShowCalibrationPose => IsCalibrationScreen && !_calibrationSucceeded;
+    public bool ShowCalibrationPose => IsCalibrationScreen && _calibration.Preview;
+    /// <summary>有効なカウントダウン中か。計測側もこの状態を確認してから確定します。</summary>
+    public bool IsCalibrationCountingDown => IsCalibrationScreen && _calibration.CountingDown;
 
     /// <summary>
     /// IK状態と腰の移動量を、設定画面の診断表示用に保持します。
@@ -203,6 +201,7 @@ internal sealed class SettingsPanel
     /// </summary>
     public void ResetUi()
     {
+        _feedback.Reset();
         try { _reopenAfterReset |= IsOpen; }
         catch { _reopenAfterReset = true; }
         _directionGuide.Dispose();
@@ -213,28 +212,25 @@ internal sealed class SettingsPanel
         foreach (var material in _markerMaterials)
             if (material != null) UnityEngine.Object.Destroy(material);
         _markerMaterials.Clear();
-        _root = _dashboard = _primaryFrame = null;
-        _title = _status = _footer = _dashboardStatus = _dashboardNextText =
-            _dashboardVisualText = null;
-        _dashboardNextBackground = _dashboardVisualBackground = _leftCursor =
-            _rightCursor = null;
+        _root = _dashboard = null;
+        _stageView = null;
+        _mountGuide = null;
+        DiscardSelection();
+        if (_calibration.Preview) _calibration.Cancel();
+        _countdownRemaining = -1f;
+        _title = _status = _footer = _dashboardStatus = _dashboardNextText = null;
+        _leftCursor = _rightCursor = null;
         Array.Clear(_rows);
-        Array.Clear(_buttons);
+        Array.Clear(_views);
+        Array.Clear(_controls);
         Array.Clear(_dashboardRows);
         Array.Clear(_dashboardCards);
         Array.Clear(_trackerMarkers);
         Array.Clear(_avatarMarkers);
         _lastSamples.Clear();
-        _armedRoleRow = -1;
         _selectedRole = null;
-        _armedDeviceKey = null;
-        Array.Clear(_visibleDeviceKeys);
-        _previousTrigger = true;
-        _previousLeftTrigger = true;
-        _previousRightTrigger = true;
-        _inputArmed = false;
-        _closeHoldStart = -1f;
-        _emptyAreaHoldStart = -1f;
+        Array.Clear(_visibleDevices);
+        _input.Block();
         _nextTextUpdate = 0f;
     }
 
@@ -258,8 +254,9 @@ internal sealed class SettingsPanel
     /// </summary>
     public void TogglePoseMode()
     {
+        if (_calibration.Stage != CalibrationStage.Pose) return;
         _tPoseMode = !_tPoseMode;
-        ClearCalibrationResult();
+        _nextTextUpdate = 0f;
     }
 
     /// <summary>
@@ -267,21 +264,14 @@ internal sealed class SettingsPanel
     /// </summary>
     /// <param name="camera">ゲーム内のHMD視点として使用するカメラ。</param>
     /// <param name="panelPose">パネルを固定するワールド姿勢。nullならHMD基準の初期配置を使用します。</param>
-    public void OpenCalibration(Camera camera, Pose? panelPose = null)
+    public void OpenCalibration(Camera camera, PanelPlacement? panelPose = null)
     {
-        _selectedRole = null;
-        _armedDeviceKey = null;
-        _panelPose = panelPose;
+        DiscardSelection();
+        _placement = panelPose;
         EnsureCreated();
         _reopenAfterReset = false;
-        _calibrationScreen = true;
-        _roleScreen = false;
-        _visualScreen = false;
-        _expressionScreen = false;
+        _navigation.Open(true);
         ClearCalibrationResult();
-        _previousTrigger = true;
-        _previousLeftTrigger = true;
-        _previousRightTrigger = true;
         SetOpen(true, camera);
     }
 
@@ -290,20 +280,13 @@ internal sealed class SettingsPanel
     /// </summary>
     /// <param name="camera">ゲーム内のHMD視点として使用するカメラ。</param>
     /// <param name="panelPose">パネルを固定するワールド姿勢。nullならHMD基準の初期配置を使用します。</param>
-    public void OpenSettings(Camera camera, Pose? panelPose = null)
+    public void OpenSettings(Camera camera, PanelPlacement? panelPose = null)
     {
-        _selectedRole = null;
-        _armedDeviceKey = null;
-        _panelPose = panelPose;
+        DiscardSelection();
+        _placement = panelPose;
         EnsureCreated();
         _reopenAfterReset = false;
-        _calibrationScreen = false;
-        _roleScreen = false;
-        _visualScreen = false;
-        _expressionScreen = false;
-        _previousTrigger = true;
-        _previousLeftTrigger = true;
-        _previousRightTrigger = true;
+        _navigation.Open(false);
         SetOpen(true, camera);
     }
 
@@ -335,10 +318,26 @@ internal sealed class SettingsPanel
     /// </summary>
     public void ClearCalibrationResult()
     {
-        _calibrationResult = null;
-        _calibrationWarning = null;
-        _calibrationSucceeded = false;
+        _calibration.Reset();
+        _countdownRemaining = -1f;
         _nextTextUpdate = 0f;
+    }
+
+    /// <summary>校正データの解除後、準備が整っている場合だけ姿勢選択を表示します。</summary>
+    public bool SelectCalibrationPose()
+    {
+        var selected = _calibration.SelectPose(_readiness.Ready);
+        _nextTextUpdate = 0f;
+        return selected;
+    }
+
+    /// <summary>姿勢選択からのみ計測を始め、設定一覧を畳む状態にします。</summary>
+    public bool BeginCalibrationCountdown()
+    {
+        var started = _calibration.Start(_readiness.Ready);
+        if (started) _countdownRemaining = _tPoseMode ? 5f : 3f;
+        _nextTextUpdate = 0f;
+        return started;
     }
 
     /// <summary>
@@ -349,9 +348,8 @@ internal sealed class SettingsPanel
     /// <param name="warning">結果とともに画面を閉じるまで表示する、校正を停止しない警告。</param>
     public void FinishCalibration(string result, bool succeeded, string? warning = null)
     {
-        _calibrationResult = result;
-        _calibrationWarning = warning;
-        _calibrationSucceeded = succeeded;
+        if (!_calibration.Complete(result, succeeded, warning)) return;
+        _countdownRemaining = -1f;
         _nextTextUpdate = 0f;
     }
 
@@ -369,8 +367,9 @@ internal sealed class SettingsPanel
     public void UpdateCalibrationMarkers(AvatarIK? avatar, bool hasPoses,
         Pose waist, Pose left, Pose right, bool hasHands, Pose leftHand, Pose rightHand)
     {
-        _directionGuide.Update(ShowCalibrationPose, hasPoses, left, right, _countdownRemaining, _tPoseMode, _poseAssessment, IsCalibrationScreen);
-        _ghostGuide.Update(avatar, ShowCalibrationPose && _tPoseMode, hasHands, leftHand, rightHand);
+        _directionGuide.Update(IsCalibrationScreen && _calibration.Stage != CalibrationStage.Review,
+            hasPoses, left, right, _countdownRemaining, _tPoseMode, _poseAssessment, IsCalibrationScreen);
+        _ghostGuide.Update(avatar, ShowCalibrationPose, hasHands, leftHand, rightHand);
         var hasCalibrationData = IsOpen && !_visualScreen &&
             (_calibrationScreen || _roleScreen) && avatar != null &&
             avatar.Animator != null && avatar.Animator.gameObject.activeInHierarchy && hasPoses;
@@ -432,36 +431,22 @@ internal sealed class SettingsPanel
     {
         _countdownRemaining = countdownRemaining;
         _poseAssessment = tPose;
-        if (!menuOpen)
-        {
-            CloseForGameplay(camera);
-            _previousTrigger = trigger;
-            _previousLeftTrigger = leftPointer.Trigger;
-            _previousRightTrigger = rightPointer.Trigger;
-            return PanelCommand.None;
-        }
+        var press = _input.Update(trigger, leftPointer.Trigger, rightPointer.Trigger,
+            leftPointer.HasPose, rightPointer.HasPose);
+        if (!menuOpen) { CloseForGameplay(camera); return PanelCommand.None; }
         EnsureCreated();
         if (_reopenAfterReset)
         {
             SetOpen(true, camera);
             _reopenAfterReset = false;
+            press = default;
         }
-        if (_root == null) return PanelCommand.None;
-        var useGaze = !leftPointer.HasPose && !rightPointer.HasPose;
-        var gazeClicked = useGaze && trigger && !_previousTrigger;
-        var leftClicked = leftPointer.Trigger && !_previousLeftTrigger;
-        var rightClicked = rightPointer.Trigger && !_previousRightTrigger;
-        var clicked = gazeClicked || leftClicked || rightClicked;
-        _previousTrigger = trigger;
-        _previousLeftTrigger = leftPointer.Trigger;
-        _previousRightTrigger = rightPointer.Trigger;
         if (!IsOpen) return PanelCommand.None;
-        // Opening the panel consumes the press until both triggers are released.
-        // Otherwise the opening press can also satisfy a held-close action.
-        if (!trigger && !leftPointer.Trigger && !rightPointer.Trigger) _inputArmed = true;
-        clicked &= _inputArmed;
-        _dashboard?.SetActive(!_visualScreen);
-
+        if (_calibrationScreen) _readiness = tracking.GetCalibrationReadiness(avatarReady, trackingReady);
+        var showMount = _roleScreen && _selectedRole is TrackerRole.LeftFoot or TrackerRole.RightFoot or TrackerRole.LeftToes or TrackerRole.RightToes;
+        _mountGuide?.Show(showMount, _selectedRole);
+        _dashboard?.SetActive(!_calibrationScreen && !showMount);
+        if (!_calibrationScreen) _stageView?.Hide();
         if (Time.unscaledTime >= _nextTextUpdate)
         {
             _nextTextUpdate = Time.unscaledTime + 0.15f;
@@ -470,258 +455,250 @@ internal sealed class SettingsPanel
                 shadowsOff, lightsOff, avatarHmdAvailable, avatarVisibleInHmd,
                 countdownRemaining, tPose);
         }
+        UpdateControls(tracking, avatarReady, trackingReady, enabled, cameraGuideEnabled,
+            shadowsOff, lightsOff, avatarHmdAvailable, avatarVisibleInHmd);
         var gazePoint = Vector3.zero;
-        var gazeHit = useGaze && TryGetGazePoint(camera, out gazePoint);
+        var gazeHit = !leftPointer.HasPose && !rightPointer.HasPose && TryGetGazePoint(camera, out gazePoint);
         var leftPoint = Vector3.zero;
         var rightPoint = Vector3.zero;
         var leftHit = leftPointer.HasPose && TryGetPointerPoint(leftPointer.Pose, out leftPoint);
         var rightHit = rightPointer.HasPose && TryGetPointerPoint(rightPointer.Pose, out rightPoint);
         UpdateCursor(_leftCursor, leftHit, leftPoint);
         UpdateCursor(_rightCursor, rightHit, rightPoint);
-        var hasFocusPoint = false;
-        var focusTrigger = false;
-        var focusPoint = Vector3.zero;
-        if (clicked)
+        var focused = -1;
+        var activation = new PanelActivation(-1, UiHand.None);
+        // A press from a hand outside the panel never activates the other hand's hover.
+        if (press.Any)
         {
-            if (rightClicked && rightHit)
-            {
-                focusPoint = rightPoint;
-                hasFocusPoint = true;
-                focusTrigger = rightPointer.Trigger;
-            }
-            else if (leftClicked && leftHit)
-            {
-                focusPoint = leftPoint;
-                hasFocusPoint = true;
-                focusTrigger = leftPointer.Trigger;
-            }
-            else if (gazeHit)
-            {
-                focusPoint = gazePoint;
-                hasFocusPoint = true;
-                focusTrigger = trigger;
-            }
+            activation = PanelControls.Activation(press, leftHit ? HitControl(leftPoint) : -1,
+                rightHit ? HitControl(rightPoint) : -1, gazeHit ? HitControl(gazePoint) : -1);
+            focused = activation.Target;
         }
-        else if (rightHit && (rightPointer.Trigger || !trigger))
-        {
-            focusPoint = rightPoint;
-            hasFocusPoint = true;
-            focusTrigger = rightPointer.Trigger;
-        }
-        else if (leftHit && (leftPointer.Trigger || !trigger))
-        {
-            focusPoint = leftPoint;
-            hasFocusPoint = true;
-            focusTrigger = leftPointer.Trigger;
-        }
-        else if (gazeHit)
-        {
-            focusPoint = gazePoint;
-            hasFocusPoint = true;
-            focusTrigger = trigger;
-        }
-        focusTrigger &= _inputArmed;
-        var row = hasFocusPoint ? HitRow(focusPoint) : -1;
-        var dashboardNextFocused = hasFocusPoint && HitDashboardNext(focusPoint);
-        var dashboardVisualFocused = hasFocusPoint && HitDashboardVisual(focusPoint);
-        if (row < 0 && !dashboardNextFocused && !dashboardVisualFocused &&
-            focusTrigger && countdownRemaining < 0f &&
-            hasFocusPoint && Mathf.Abs(focusPoint.x) <= 800f &&
-            Mathf.Abs(focusPoint.y) <= 400f)
-        {
-            if (_emptyAreaHoldStart < 0f) _emptyAreaHoldStart = Time.unscaledTime;
-            else if (Time.unscaledTime - _emptyAreaHoldStart >= 1.25f)
-            {
-                SetOpen(false, camera);
-                return PanelCommand.Close;
-            }
-        }
-        else _emptyAreaHoldStart = -1f;
-        if (row == 6 && focusTrigger)
-        {
-            if (_closeHoldStart < 0f) _closeHoldStart = Time.unscaledTime;
-        }
-        else _closeHoldStart = -1f;
-        if (_dashboardNextBackground != null && !_visualScreen)
-            _dashboardNextBackground.color = dashboardNextFocused
-                ? new Color(0.08f, 0.44f, 0.56f, 0.98f)
-                : RowFill;
-        if (_dashboardVisualBackground != null && !_visualScreen)
-            _dashboardVisualBackground.color = dashboardVisualFocused
-                ? new Color(0.08f, 0.44f, 0.56f, 0.98f)
-                : RowFill;
-        var calibrationReady = trackingReady && avatarReady;
-        _primaryFrame?.SetActive(_calibrationScreen && !_roleScreen && !_visualScreen);
-        for (var i = 0; i < _buttons.Length; i++)
-        {
-            if (_buttons[i] != null)
-                _buttons[i]!.color = i == row &&
-                    (!_visualScreen || i <= 4 || i == 6)
-                    ? _calibrationScreen && !_roleScreen && !_visualScreen && i == 0
-                        ? Pink
-                        : new Color(0.06f, 0.43f, 0.55f, 0.98f)
-                    : (_visualScreen && i == 5)
-                        ? PanelFill
-                        : _calibrationScreen && !_roleScreen && !_visualScreen && i == 0
-                            ? calibrationReady
-                                ? new Color(0.73f, 0.03f, 0.60f, 0.98f)
-                                : new Color(0.23f, 0.09f, 0.29f, 0.97f)
-                        : RowFill;
-            if (_rows[i] != null)
-                _rows[i]!.color = i == row ||
-                    _calibrationScreen && !_roleScreen && !_visualScreen && i == 0
-                    ? Color.white : new Color(0.56f, 0.88f, 0.97f, 1f);
-        }
-        if (_roleScreen && _armedRoleRow is >= 0 and <= 3 &&
-            Time.unscaledTime <= _armedRoleUntil && _buttons[_armedRoleRow] != null)
-            _buttons[_armedRoleRow]!.color = Pink;
-        // A held trigger also closes the panel. This covers trigger presses
-        // that began just before the gaze entered the Close row.
-        if (row == 6 && focusTrigger &&
-            (clicked || Time.unscaledTime - _closeHoldStart >= 0.35f))
+        else if (rightHit && (rightPointer.Trigger || !trigger)) focused = HitControl(rightPoint);
+        else if (leftHit && (leftPointer.Trigger || !trigger)) focused = HitControl(leftPoint);
+        else if (gazeHit) focused = HitControl(gazePoint);
+        for (var i = 0; i < _views.Length; i++) _views[i]?.Render(_controls[i], i == focused);
+        if (!press.Any || focused < 0) return PanelCommand.None;
+        _views[focused]?.Pulse();
+        PlayFeedback(tracking, activation.Hand);
+        _input.Block();
+        _nextTextUpdate = 0f;
+        if (focused == PanelControls.Close)
         {
             SetOpen(false, camera);
             return PanelCommand.Close;
         }
-        if (!clicked) return PanelCommand.None;
-        if (dashboardNextFocused)
+        if (focused == PanelControls.Back) return GoBack();
+        if (focused == PanelControls.DashboardDetails)
         {
-            _dashboardPage = (_dashboardPage + 1) % _dashboardPages;
-            _nextTextUpdate = 0f;
+            var firstDevice = _dashboardPage * (_uiConfig.UiTrackerDetails ? 1 : 3);
+            _uiConfig.UiTrackerDetails = !_uiConfig.UiTrackerDetails;
+            _dashboardPage = firstDevice / (_uiConfig.UiTrackerDetails ? 1 : 3);
+            return PanelCommand.UiPreferencesChanged;
+        }
+        if (_appearanceScreen && (focused < PanelControls.RowCount || focused is >= PanelControls.TextStandard and <= PanelControls.Farther))
+            return HandleAppearance(focused);
+        if (focused is >= PanelControls.Trackers and <= PanelControls.Details)
+        {
+            var cancel = ShowCalibrationPose;
+            Navigate(focused switch
+            {
+                PanelControls.Trackers => PanelPage.Trackers,
+                PanelControls.Display => PanelPage.Display,
+                PanelControls.Expressions => PanelPage.Expressions,
+                _ => PanelPage.Details
+            });
+            return cancel ? PanelCommand.CancelCalibration : PanelCommand.None;
+        }
+        if (focused is PanelControls.DashboardPrevious or PanelControls.DashboardNext)
+        {
+            if (_calibrationScreen) _stageView?.ChangePage(focused == PanelControls.DashboardNext ? 1 : -1);
+            else _dashboardPage = Math.Clamp(_dashboardPage + (focused == PanelControls.DashboardNext ? 1 : -1), 0, _dashboardPages - 1);
             return PanelCommand.None;
         }
-        if (dashboardVisualFocused)
+        if (focused is PanelControls.PagePrevious or PanelControls.PageNext)
         {
-            _visualScreen = true;
-            _expressionScreen = false;
-            _nextTextUpdate = 0f;
+            ChangePage(focused == PanelControls.PageNext ? 1 : -1);
             return PanelCommand.None;
         }
-        if (row < 0) return PanelCommand.None;
+        if (focused is PanelControls.TPose or PanelControls.Standing)
+            return (focused == PanelControls.TPose) != _tPoseMode ? PanelCommand.TogglePoseMode : PanelCommand.None;
+        return HandleRow(focused, tracking, camera);
+    }
+
+    /// <summary>有効と判定済みの操作行だけを実行します。情報表示はこの経路に入りません。</summary>
+    private PanelCommand HandleRow(int row, Tracking tracking, Camera camera)
+    {
         if (_expressionScreen) return HandleExpressionRow(row);
-        if (_visualScreen)
+        if (_visualScreen && row == 4)
         {
-            if (row == 0) return PanelCommand.ToggleCameraGuide;
-            if (row == 1) return PanelCommand.ToggleAvatarShadows;
-            if (row == 2) return PanelCommand.ToggleAvatarLights;
-            if (row == 3) return avatarHmdAvailable ?
-                PanelCommand.ToggleAvatarInHeadset : PanelCommand.None;
-            if (row == 4)
-            {
-                _visualScreen = false;
-                _nextTextUpdate = 0f;
-            }
+            _appearanceScreen = true;
             return PanelCommand.None;
         }
-        if (_roleScreen)
+        if (_visualScreen)
+            return row switch
+            {
+                0 => PanelCommand.ToggleCameraGuide,
+                1 => PanelCommand.ToggleAvatarShadows,
+                2 => PanelCommand.ToggleAvatarLights,
+                3 => PanelCommand.ToggleAvatarInHeadset,
+                _ => PanelCommand.None
+            };
+        if (_roleScreen) return HandleAssignmentRow(row, tracking, camera);
+        if (_ultimateBefore is { } before)
         {
-            if (_selectedRole is { } selected)
+            if (row == 5) { DiscardSelection(); return PanelCommand.None; }
+            if (row == 3 && tracking.UltimateCorrectionEnabled == before)
             {
-                if (row is >= 0 and <= 2 && _visibleDeviceKeys[row] is { } key)
-                {
-                    if (_armedDeviceKey == key && Time.unscaledTime <= _armedRoleUntil)
-                    {
-                        tracking.Assign(selected, key);
-                        _armedDeviceKey = null;
-                        _armedRoleRow = -1;
-                        _selectedRole = null;
-                        _nextTextUpdate = 0f;
-                        return PanelCommand.AssignmentChanged;
-                    }
-                    _armedDeviceKey = key;
-                    _armedRoleRow = row;
-                    _armedRoleUntil = Time.unscaledTime + 4f;
-                }
-                else if (row == 3)
-                {
-                    _devicePage = (_devicePage + 1) % Math.Max(1, (tracking.Devices.Count + 2) / 3);
-                    _armedDeviceKey = null;
-                }
-                else if (row == 4)
-                {
-                    tracking.Assign(selected, null);
-                    _selectedRole = null;
-                    _nextTextUpdate = 0f;
-                    return PanelCommand.AssignmentChanged;
-                }
-                else if (row == 5) _selectedRole = null;
-                _nextTextUpdate = 0f;
-                return PanelCommand.None;
+                DiscardSelection();
+                return PanelCommand.ToggleUltimateRotation;
             }
-            if (row is >= 0 and <= 2)
-            {
-                _selectedRole = TrackerRoles.All[_rolePage * 3 + row];
-                _devicePage = 0;
-                _armedDeviceKey = null;
-                _armedRoleRow = -1;
-                Array.Clear(_visibleDeviceKeys);
-            }
-            else if (row == 3)
-            {
-                if (_armedDeviceKey == "AUTO" && Time.unscaledTime <= _armedRoleUntil)
-                {
-                    tracking.AutoAssign(camera);
-                    _armedDeviceKey = null;
-                    _armedRoleRow = -1;
-                    _nextTextUpdate = 0f;
-                    return PanelCommand.AssignmentChanged;
-                }
-                _armedDeviceKey = "AUTO";
-                _armedRoleRow = 3;
-                _armedRoleUntil = Time.unscaledTime + 4f;
-            }
-            else if (row == 4) _rolePage = (_rolePage + 1) % (TrackerRoles.All.Length / 3);
-            else if (row == 5)
-            {
-                _roleScreen = false;
-                _armedRoleRow = -1;
-            }
-            _nextTextUpdate = 0f;
             return PanelCommand.None;
         }
         if (_calibrationScreen)
         {
             if (row == 0)
-                return countdownRemaining < 0f && trackingReady && avatarReady
-                    ? PanelCommand.StartCalibration : PanelCommand.None;
-            if (row == 1) return PanelCommand.TogglePoseMode;
-            if (row == 2)
             {
-                _roleScreen = true;
-                _armedRoleRow = -1;
-                _nextTextUpdate = 0f;
-                return PanelCommand.None;
+                if (_calibration.Stage == CalibrationStage.Preparation) return PanelCommand.PrepareCalibration;
+                if (_calibration.Stage == CalibrationStage.Pose) return PanelCommand.StartCalibration;
+                if (_calibration.CountingDown)
+                {
+                    _calibration.Cancel();
+                    _countdownRemaining = -1f;
+                    return PanelCommand.CancelCalibration;
+                }
+                if (_calibration.Succeeded)
+                {
+                    SetOpen(false, camera);
+                    return PanelCommand.Close;
+                }
+                ClearCalibrationResult();
             }
-            if (row == 3)
+            else if (row == 1 && _calibration.Stage == CalibrationStage.Review && _calibration.Succeeded)
+                ClearCalibrationResult();
+            else if (row == 5 || row == 1 && _calibration.Stage == CalibrationStage.Review)
             {
-                _calibrationScreen = false;
-                _nextTextUpdate = 0f;
+                var cancel = ShowCalibrationPose;
+                Navigate(PanelPage.Trackers);
+                return cancel ? PanelCommand.CancelCalibration : PanelCommand.None;
             }
             return PanelCommand.None;
         }
         if (row == 0) return PanelCommand.Recalibrate;
-        if (row == 1)
-        {
-            _roleScreen = true;
-            _armedRoleRow = -1;
-            _nextTextUpdate = 0f;
-            return PanelCommand.None;
-        }
+        if (row == 1) Navigate(PanelPage.Trackers);
         if (row == 2) return PanelCommand.ToggleTracking;
-        if (row == 4)
-        {
-            _expressionScreen = true;
-            _expressionButton = null;
-            _nextTextUpdate = 0f;
-            return PanelCommand.None;
-        }
-        if (row == 5) return PanelCommand.ToggleUltimateRotation;
-        if (row == 3)
-        {
-            _visualScreen = true;
-            _nextTextUpdate = 0f;
-        }
+        if (row == 3) Navigate(PanelPage.Display);
+        if (row == 4) Navigate(PanelPage.Expressions);
+        if (row == 5) _ultimateBefore = tracking.UltimateCorrectionEnabled;
         return PanelCommand.None;
+    }
+
+    /// <summary>未確定の個体と下位画面の選択を破棄します。保存済みの割り当ては変更しません。</summary>
+    private void DiscardSelection()
+    {
+        _appearanceScreen = false;
+        _assignmentDraft = _automaticDraft = null;
+        _confirmingAutomatic = false;
+        _ultimateBefore = null;
+        _deviceChoices.Clear();
+        _selectedRole = null;
+        _expressionButton = null;
+        Array.Clear(_visibleDevices);
+        Array.Clear(_visibleExpressions);
+    }
+
+    /// <summary>タブへ移動し、直前の押下と未確定の選択を引き継がないようにします。</summary>
+    private void Navigate(PanelPage page)
+    {
+        if (ShowCalibrationPose) { _calibration.Cancel(); _countdownRemaining = -1f; }
+        DiscardSelection();
+        _navigation.SelectTab(page);
+        _nextTextUpdate = 0f;
+        _input.Block();
+    }
+
+    /// <summary>個体・表情選択では一覧へ、それ以外では上位画面へ戻ります。</summary>
+    private PanelCommand GoBack()
+    {
+        _nextTextUpdate = 0f;
+        _input.Block();
+        if (IsCalibrationScreen && _calibration.Stage != CalibrationStage.Preparation)
+        {
+            var cancel = _calibration.Preview;
+            _calibration.Cancel();
+            _countdownRemaining = -1f;
+            return cancel ? PanelCommand.CancelCalibration : PanelCommand.None;
+        }
+        var nested = _appearanceScreen || _selectedRole != null || _expressionButton != null || _assignmentDraft != null || _automaticDraft != null || _ultimateBefore != null;
+        DiscardSelection();
+        if (!nested) _navigation.Back();
+        return PanelCommand.None;
+    }
+
+    /// <summary>画面の現在状態から、描画と入力で共有する操作種別と有効状態を構築します。</summary>
+    private void UpdateControls(Tracking tracking, bool avatarReady, bool trackingReady,
+        bool enabled, bool cameraGuide, bool shadowsOff, bool lightsOff, bool hmdAvailable, bool hmdVisible)
+    {
+        Array.Clear(_controls);
+        _controls[PanelControls.Back] = new(PanelControlKind.Navigation, _navigation.CanGoBack || _ultimateBefore != null);
+        _controls[PanelControls.Close] = new(PanelControlKind.Navigation);
+        _controls[PanelControls.Trackers] = new(PanelControlKind.Choice, true, _roleScreen);
+        _controls[PanelControls.Display] = new(PanelControlKind.Choice, true, _visualScreen);
+        _controls[PanelControls.Expressions] = new(PanelControlKind.Choice, true, _expressionScreen);
+        _controls[PanelControls.Details] = new(PanelControlKind.Choice, true, _navigation.Current == PanelPage.Details);
+        if (!_calibrationScreen && _dashboard != null && _dashboard.activeSelf)
+        {
+            _controls[PanelControls.DashboardDetails] = new(PanelControlKind.Toggle, true, _uiConfig.UiTrackerDetails);
+            PanelControls.Paging(_controls, PanelControls.DashboardPrevious, PanelControls.DashboardNext, _dashboardPage, _dashboardPages);
+        }
+        if (_appearanceScreen) UpdateAppearanceControls();
+        else if (_visualScreen)
+        {
+            _controls[0] = new(PanelControlKind.Toggle, true, cameraGuide);
+            _controls[1] = new(PanelControlKind.Toggle, true, !shadowsOff);
+            _controls[2] = new(PanelControlKind.Toggle, true, !lightsOff);
+            _controls[3] = new(PanelControlKind.Toggle, hmdAvailable, hmdVisible);
+            _controls[4] = new(PanelControlKind.Navigation);
+            _controls[5] = new(PanelControlKind.Information);
+        }
+        else if (_roleScreen) UpdateAssignmentControls(tracking);
+        else if (_ultimateBefore is { } before)
+        {
+            for (var i = 0; i < 3; i++) _controls[i] = new(PanelControlKind.Information);
+            _controls[3] = new(PanelControlKind.Primary, tracking.UltimateCorrectionEnabled == before);
+            _controls[5] = new(PanelControlKind.Navigation);
+        }
+        else if (_expressionScreen)
+        {
+            if (_expressionConfig == null || _expressions == null) return;
+            _controls[0] = new(PanelControlKind.Toggle, true, _expressionButton is { } b
+                ? GetExpressionBinding(b).Toggle : _expressionConfig.ExpressionsEnabled);
+            for (var i = 1; i <= 3; i++)
+                _controls[i] = _expressionButton is { } button
+                    ? new(_visibleExpressions[i - 1] == null ? PanelControlKind.Hidden : PanelControlKind.Choice,
+                        true, _visibleExpressions[i - 1] == GetExpressionBinding(button).Expression)
+                    : new(PanelControlKind.Navigation);
+            _controls[5] = new(PanelControlKind.Information);
+            if (_expressionButton != null) SetPaging(_expressionPage, _expressionPages);
+            else _controls[4] = new(PanelControlKind.Navigation);
+        }
+        else if (_calibrationScreen)
+        {
+            _calibration.ApplyControls(_controls, _readiness.Ready, _tPoseMode);
+            if (_calibration.Stage == CalibrationStage.Review && _stageView is { MessagePages: > 1 } view)
+            {
+                _controls[PanelControls.DashboardPrevious] = new(PanelControlKind.Navigation, view.MessagePage > 1);
+                _controls[PanelControls.DashboardNext] = new(PanelControlKind.Navigation, view.MessagePage < view.MessagePages);
+                _views[PanelControls.DashboardNext]!.Label.text = UiText.Get("Next page");
+            }
+        }
+        else
+        {
+            _controls[0] = new(PanelControlKind.Primary);
+            _controls[1] = _controls[3] = _controls[4] = new(PanelControlKind.Navigation);
+            _controls[2] = new(PanelControlKind.Toggle, true, enabled);
+            _controls[5] = new(PanelControlKind.Navigation);
+        }
     }
 
     /// <summary>
@@ -735,30 +712,34 @@ internal sealed class SettingsPanel
             PanelFill);
         VrUi.HexOutline(_root, "NeonPanelFrame", new Vector2(1570f, 770f),
             Vector2.zero, new Color(0.46f, 0.20f, 0.69f, 0.28f), 2f, 95f);
-        VrUi.Image(_root, "CalibrationTab", new Vector2(820f, 65f),
-            new Vector2(-340f, 350f), Violet);
-        VrUi.HexOutline(_root, "CalibrationTabEdge", new Vector2(825f, 69f),
-            new Vector2(-340f, 350f), new Color(0.68f, 0.37f, 1f, 0.8f), 2f, 42f);
-        VrUi.Image(_root, "Divider", new Vector2(3f, 740f), new Vector2(105f, 0f),
+        VrUi.Image(_root, "Divider", new Vector2(3f, 650f), new Vector2(105f, -20f),
             new Color(0.24f, 0.20f, 0.49f, 0.75f));
-        _title = VrUi.Text(_root, "Title", new Vector2(820f, 52f), new Vector2(-340f, 350f),
-            35f, Color.white, TextAlignmentOptions.Center);
-        _status = VrUi.Text(_root, "Status", new Vector2(820f, 45f), new Vector2(-340f, 292f),
-            27f, Color.white, TextAlignmentOptions.Center);
-        for (var i = 0; i < _rows.Length; i++)
+        _title = VrUi.Text(_root, "Title", new Vector2(900f, 60f), new Vector2(0f, 350f),
+            34f, Color.white, TextAlignmentOptions.Center);
+        _title.enableWordWrapping = true;
+        _status = VrUi.Text(_root, "Status", new Vector2(820f, 46f), new Vector2(-340f, 215f),
+            25f, Color.white, TextAlignmentOptions.Center);
+        _status.enableWordWrapping = true;
+        for (var i = 0; i < _views.Length; i++)
         {
-            _buttons[i] = VrUi.Image(_root, $"Button{i}", new Vector2(820f, 70f),
-                new Vector2(-340f, RowY[i]), RowFill);
-            _rows[i] = VrUi.Text(_root, $"ButtonLabel{i}", new Vector2(780f, 62f),
-                new Vector2(-340f, RowY[i]), 33f, Color.white, TextAlignmentOptions.MidlineLeft);
+            _views[i] = new PanelControlView(_root, i, i is >= PanelControls.Back and <= PanelControls.Details ? 25f : 30f);
+            if (i < _rows.Length) _rows[i] = _views[i]!.Label;
         }
-        _primaryFrame = VrUi.HexOutline(_root, "CalibrationButtonFrame",
-            new Vector2(830f, 77f), new Vector2(-340f, RowY[0]),
-            new Color(1f, 0.30f, 0.88f, 0.72f), 2f, 42f);
-        _primaryFrame.SetActive(false);
-        _footer = VrUi.Text(_root, "Help", new Vector2(840f, 66f), new Vector2(-340f, -342f),
+        UiLocalization.Bind(_views[PanelControls.Back]!.Label, "Back");
+        UiLocalization.Bind(_views[PanelControls.Close]!.Label, "Close panel");
+        UiLocalization.Bind(_views[PanelControls.Trackers]!.Label, "Trackers");
+        UiLocalization.Bind(_views[PanelControls.Display]!.Label, "Display");
+        UiLocalization.Bind(_views[PanelControls.Expressions]!.Label, "Expressions");
+        UiLocalization.Bind(_views[PanelControls.Details]!.Label, "Details");
+        _dashboardNextText = _views[PanelControls.DashboardNext]!.Label;
+        UiLocalization.Bind(_views[PanelControls.DashboardPrevious]!.Label, "Previous page");
+        UiLocalization.Bind(_views[PanelControls.DashboardDetails]!.Label, "Show details");
+        _footer = VrUi.Text(_root, "Help", new Vector2(820f, 100f), new Vector2(-340f, -325f),
             22f, new Color(0.7f, 0.8f, 0.9f), TextAlignmentOptions.Center);
+        _footer.enableWordWrapping = true;
         CreateDashboard();
+        _stageView = new CalibrationStageView(_root);
+        _mountGuide = new TrackerMountGuide(_root);
         _leftCursor = VrUi.Image(_root, "LeftControllerCursor", new Vector2(19f, 19f),
             Vector2.zero, Cyan);
         _rightCursor = VrUi.Image(_root, "RightControllerCursor", new Vector2(19f, 19f),
@@ -774,7 +755,7 @@ internal sealed class SettingsPanel
     }
 
     /// <summary>
-    /// LIVE TRACKERSの表示領域とページ送り・描画設定への入口を作成します。
+    /// LIVE TRACKERSの情報カードを作成します。操作部品は共通定義で作成済みです。
     /// </summary>
     private void CreateDashboard()
     {
@@ -785,37 +766,21 @@ internal sealed class SettingsPanel
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.sizeDelta = new Vector2(690f, 800f);
         rect.anchoredPosition = new Vector2(445f, 0f);
-        VrUi.Image(_dashboard, "DashboardTab", new Vector2(630f, 65f),
-            new Vector2(0f, 350f), new Color(0.25f, 0.13f, 0.47f, 0.98f));
-        VrUi.HexOutline(_dashboard, "DashboardTabEdge", new Vector2(635f, 69f),
-            new Vector2(0f, 350f), new Color(0.53f, 0.26f, 0.81f, 0.65f), 2f, 42f);
-        VrUi.Text(_dashboard, "DashboardTitle", new Vector2(620f, 52f),
-            new Vector2(0f, 350f), 35f, Color.white,
-            TextAlignmentOptions.Center).text = "LIVE TRACKERS";
-        _dashboardStatus = VrUi.Text(_dashboard, "DashboardStatus", new Vector2(620f, 42f),
-            new Vector2(0f, 292f), 25f, Color.white, TextAlignmentOptions.Center);
+        UiLocalization.Bind(VrUi.Text(_dashboard, "DashboardTitle", new Vector2(300f, 62f),
+            new Vector2(-165f, 270f), 27f, Color.white,
+            TextAlignmentOptions.Center), "LIVE TRACKERS");
+        _dashboardStatus = VrUi.Text(_dashboard, "DashboardStatus", new Vector2(620f, 50f),
+            new Vector2(0f, 207f), 22f, Color.white, TextAlignmentOptions.Center);
         for (var i = 0; i < _dashboardRows.Length; i++)
         {
-            var y = 205f - i * 95f;
+            var y = 100f - i * 150f;
             _dashboardCards[i] = VrUi.Image(_dashboard, $"TrackerCard{i}",
-                new Vector2(630f, 88f), new Vector2(0f, y),
+                new Vector2(630f, 142f), new Vector2(0f, y),
                 new Color(0.07f, 0.07f, 0.18f, 0.97f));
             _dashboardRows[i] = VrUi.Text(_dashboard, $"TrackerCardText{i}",
-                new Vector2(600f, 82f), new Vector2(0f, y),
+                new Vector2(600f, 134f), new Vector2(0f, y),
                 22f, new Color(0.52f, 0.91f, 0.98f), TextAlignmentOptions.MidlineLeft);
         }
-        _dashboardNextBackground = VrUi.Image(_dashboard, "DashboardNext",
-            new Vector2(630f, 62f), new Vector2(0f, -282f),
-            RowFill);
-        _dashboardNextText = VrUi.Text(_dashboard, "DashboardNextText",
-            new Vector2(600f, 58f), new Vector2(0f, -282f),
-            27f, Color.white, TextAlignmentOptions.Center);
-        _dashboardVisualBackground = VrUi.Image(_dashboard, "DashboardVisual",
-            new Vector2(630f, 55f), new Vector2(0f, -348f), RowFill);
-        _dashboardVisualText = VrUi.Text(_dashboard, "DashboardVisualText",
-            new Vector2(600f, 52f), new Vector2(0f, -348f),
-            25f, Color.white, TextAlignmentOptions.Center);
-        _dashboardVisualText.text = "VISUAL OPTIONS  >";
     }
 
     /// <summary>
@@ -872,6 +837,9 @@ internal sealed class SettingsPanel
         bool avatarHmdAvailable, bool avatarVisibleInHmd,
         float countdownRemaining, TPoseAssessment tPose)
     {
+        foreach (var row in _rows) if (row != null) row.text = "";
+        if (!_calibrationScreen) UpdateDashboardText(tracking);
+        if (_appearanceScreen) { UpdateAppearanceText(); return; }
         if (_visualScreen)
         {
             UpdateVisualText(cameraGuideEnabled, captureCameraFound,
@@ -879,70 +847,121 @@ internal sealed class SettingsPanel
                 avatarHmdAvailable, avatarVisibleInHmd);
             return;
         }
-        UpdateDashboardText(tracking);
-        for (var i = 0; i < _rows.Length; i++) _rows[i]!.fontSize = 33f;
+        for (var i = 0; i < _rows.Length; i++) VrUi.SetFontSize(_rows[i]!, 33f);
         if (_expressionScreen) { UpdateExpressionText(); return; }
         if (_roleScreen) { UpdateRoleText(tracking); return; }
-        _title!.text = _calibrationScreen
+        if (_ultimateBefore != null) { UpdateUltimateText(); return; }
+        _title!.text = UiText.Get(_calibrationScreen
             ? (_tPoseMode ? "T-POSE CALIBRATION" : "STANDING CALIBRATION")
-            : "FULL BODY SETTINGS";
+            : "FULL BODY SETTINGS");
         _status!.text = _calibrationScreen
-            ? $"FRONT = {_directionGuide.Source}  |  Trackers: {tracking.TrackerCount}  |  Avatar: {(avatarReady ? "OK" : "missing")}" 
-            : $"{tracking.SourceLabel}: {tracking.TrackerCount}  |  HMD: {(tracking.HmdPresent ? "OK" : "missing")}  |  Avatar: {(avatarReady ? "OK" : "missing")}";
-        if (_calibrationScreen)
+            ? UiText.Format("FRONT = {0}  |  Trackers: {1}  |  Avatar: {2}", UiText.Get(_directionGuide.Source), tracking.TrackerCount, UiText.Get(avatarReady ? "OK" : "missing"))
+            : UiText.Format("{0}: {1}  |  HMD: {2}  |  Avatar: {3}", tracking.SourceLabel, tracking.TrackerCount, UiText.Get(tracking.HmdPresent ? "OK" : "missing"), UiText.Get(avatarReady ? "OK" : "missing"));
+        if (_calibrationScreen) UpdateCalibrationText(tracking, tPose);
+        else
         {
-            _rows[0]!.text = countdownRemaining >= 0f
-                ? _tPoseMode
-                    ? $"T-pose then hold: {Mathf.CeilToInt(countdownRemaining)}"
-                    : $"Hold still: {Mathf.CeilToInt(countdownRemaining)}"
-                : _calibrationResult == null
-                    ? _tPoseMode
-                        ? "START T-POSE CALIBRATION"
-                        : "CALIBRATE STANDING"
-                : _calibrationSucceeded ? "RECALIBRATE" : "RETRY CALIBRATION";
-            _rows[1]!.text = $"Pose: {(_tPoseMode ? "T-pose" : "standing")}  >";
-            _rows[2]!.text = "TRACKER ROLES  >";
-            _rows[3]!.text = "Back to settings";
-            _rows[4]!.text = _bodyStatus;
-            _rows[5]!.text = _waistMotion;
-            _rows[4]!.fontSize = _rows[5]!.fontSize = 24f;
-            _rows[6]!.text = "Close panel";
-            var calibrationStatus = _calibrationResult ?? tPose.Status;
-            var warning = _calibrationResult != null ? _calibrationWarning : tPose.Warning;
-            var poseHint = warning != null ? "WARNING: " + warning :
-                _calibrationSucceeded ? "Close panel; entry buttons stay available" :
-                _waistHeightStatus.StartsWith("Waist is only", StringComparison.Ordinal)
-                    ? _waistHeightStatus
-                    : _tPoseMode
-                        ? "Size auto-fits; START; face dot; arms level; feet apart"
-                        : "Size auto-fits; face dot; stand still with feet apart";
-            _footer!.text = $"{calibrationStatus}\n{poseHint}";
+            _rows[0]!.text = UiText.Get(_recalibrationRequired ? "Go to calibration" : "CALIBRATE FULL BODY  >").TrimEnd(' ', '>');
+            _rows[1]!.text = UiText.Get("TRACKER ROLES  >").TrimEnd(' ', '>');
+            _rows[2]!.text = UiText.Format("Tracking: {0}", UiText.OnOff(enabled));
+            _rows[3]!.text = UiText.Get("VISUAL OPTIONS  >").TrimEnd(' ', '>');
+            _rows[4]!.text = UiText.Get("EXPRESSIONS  >").TrimEnd(' ', '>');
+            _rows[5]!.text = UiText.Format("Ultimate 180 correction: {0}", UiText.OnOff(tracking.UltimateCorrectionEnabled));
+            VrUi.SetFontSize(_rows[5]!, 30f);
+            _footer!.text = UiText.Get(_recalibrationRequired ? "Recalibration required." :
+                "Use only when forward AND sideways motion are reversed.");
+        }
+    }
+
+    /// <summary>手順ごとに必要な操作・準備状態・案内を表示します。計測中の設定一覧は畳みます。</summary>
+    private void UpdateCalibrationText(Tracking tracking, TPoseAssessment assessment)
+    {
+        var stage = _calibration.Stage;
+        _stageView?.Update(_calibration, _tPoseMode, _countdownRemaining, assessment.Warning);
+        foreach (var row in _rows) if (row != null) VrUi.SetFontSize(row, 28f);
+        var stageName = stage switch
+        {
+            CalibrationStage.Preparation => "Preparation",
+            CalibrationStage.Pose => "Choose a pose",
+            CalibrationStage.Countdown => "Countdown",
+            _ => "Check movement"
+        };
+        _title!.text = UiText.Format("Step {0} / 4: {1}", (int)stage + 1, UiText.Get(stageName));
+        _status!.text = UiText.Get(_directionGuide.UsesMirror ? "FRONT = MIRROR" : "FRONT = THIS ARROW");
+        _rows[5]!.text = UiText.Get("Check tracker assignments");
+        if (stage == CalibrationStage.Preparation)
+        {
+            _rows[0]!.text = UiText.Get("Continue: choose pose");
+            _rows[1]!.text = UiText.Format("Avatar: {0}", UiText.Get(_readiness.AvatarReady ? "Ready" : "Load an avatar in the game menu"));
+            _rows[2]!.text = ReadinessLabel("Waist", _readiness.Waist);
+            _rows[3]!.text = ReadinessLabel("Left foot", _readiness.Left) + FootRoleLabel(tracking, true);
+            _rows[4]!.text = ReadinessLabel("Right foot", _readiness.Right) + FootRoleLabel(tracking, false);
+            _footer!.text = UiText.Get(_calibration.Canceled ? "Calibration canceled. Choose a pose to try again." :
+                _readiness.Ready ? "Your assignments are ready. Continuing starts a new calibration." :
+                "Load an avatar and check missing devices in Trackers.");
+            if (_readiness.AdditionalIssue != null) _footer.text += "\n" + UiText.Status(_readiness.AdditionalIssue);
+        }
+        else if (stage == CalibrationStage.Pose)
+        {
+            _rows[0]!.text = UiText.Get(_tPoseMode ? "START T-POSE CALIBRATION" : "CALIBRATE STANDING");
+            _views[PanelControls.TPose]!.Label.text = (_tPoseMode ? UiText.Get("[Selected] ") : "") + UiText.Get("T-pose");
+            _views[PanelControls.Standing]!.Label.text = (!_tPoseMode ? UiText.Get("[Selected] ") : "") + UiText.Get("standing");
+            _rows[2]!.text = UiText.Get("Face the FRONT arrow / mirror before checking feet");
+            _rows[3]!.text = UiText.Get(_tPoseMode ? "After Start, spread your arms at shoulder height. You have 5 seconds."
+                : "Relax your arms and stand with feet apart. You have 3 seconds.");
+            _rows[4]!.text = _readiness.Ready ? UiText.Get("The avatar holds the selected pose until calibration finishes.")
+                : !_readiness.AvatarReady ? UiText.Get("Load an avatar in the game menu")
+                : _readiness.AdditionalIssue != null ? UiText.Status(_readiness.AdditionalIssue)
+                : UiText.Get("Waist / feet unavailable: open Trackers to check assignments and tracking");
+            _footer!.text = _readiness.AdditionalIssue != null ? UiText.Status(_readiness.AdditionalIssue) :
+                assessment.Warning != null ? UiText.Format("WARNING: {0}", UiText.Status(assessment.Warning)) :
+                UiText.Get("Look at the eye-level target. Back cancels the pose preview.");
+        }
+        else if (stage == CalibrationStage.Countdown)
+        {
+            _rows[0]!.text = UiText.Get("Cancel calibration");
+            _rows[1]!.text = UiText.Get("LOOK AT THE DOT");
+            _rows[2]!.text = UiText.Get(_tPoseMode ? "HOLD T-POSE" : "HOLD STILL");
+            _footer!.text = assessment.Ready ? UiText.Get("Back or Close cancels the countdown") : UiText.Status(assessment.Status);
         }
         else
         {
-            _rows[0]!.text = "CALIBRATE FULL BODY  >";
-            _rows[1]!.text = "TRACKER ROLES  >";
-            _rows[2]!.text = $"Tracking: {(enabled ? "ON" : "OFF")}";
-            _rows[3]!.text = "VISUAL OPTIONS  >";
-            _rows[4]!.text = "EXPRESSIONS  >";
-            _rows[5]!.text = $"Ultimate 180 correction: {(tracking.UltimateCorrectionEnabled ? "ON" : "OFF")}";
-            _rows[5]!.fontSize = 30f;
-            _rows[6]!.text = "Close panel";
-            _footer!.text = "Ultimate correction: for reversed forward AND sideways motion\nAfter changing this option, calibrate again";
+            _rows[0]!.text = UiText.Get(_calibration.Succeeded ? "Done" : "Try again");
+            _rows[1]!.text = UiText.Get(_calibration.Succeeded ? "Try again" : "Check tracker assignments");
+            _rows[2]!.text = UiText.Get(_calibration.Succeeded ? "Calibration complete" : "Calibration did not finish");
+            _rows[3]!.text = UiText.Get(_calibration.Succeeded ? "Check waist and foot movement in the mirror." : "See the reason on the right.");
+            _footer!.text = UiText.Get(_calibration.Succeeded ? "Done closes this panel. It does not automatically verify pose accuracy."
+                : "The pose preview has been released. Retry when you are ready.");
         }
+    }
+
+    /// <summary>準備OK・未設定・喪失・重複を個々の部位名とともに表示します。</summary>
+    private static string ReadinessLabel(string role, CalibrationDeviceState state) =>
+        UiText.Format("{0}: {1}", UiText.Get(role), UiText.Get(state switch
+        {
+            CalibrationDeviceState.Ready => "Ready",
+            CalibrationDeviceState.Unassigned => "Unassigned",
+            CalibrationDeviceState.Conflict => "Assignment conflict",
+            _ => "Tracking lost"
+        }));
+
+    /// <summary>足首・足先のどちらを主入力として確認しているか、設定済みの場合だけ補足します。</summary>
+    private static string FootRoleLabel(Tracking tracking, bool left)
+    {
+        var role = tracking.PrimaryFoot(left);
+        return tracking.HasAssignment(role) ? " (" + UiText.Get(TrackerRoles.Label(role)) + ")" : "";
     }
 
     /// <summary>選択肢として未割り当て・解除・現在のVRMが持つ表情を列挙します。</summary>
     private List<ExpressionChoice> ExpressionOptions()
     {
-        var choices = new List<ExpressionChoice> { new("", "Unassigned"), new("$reset", "Reset expression") };
+        var choices = new List<ExpressionChoice> { new("", UiText.Get("Unassigned")), new("$reset", UiText.Get("Reset expression")) };
         if (_expressions != null) choices.AddRange(_expressions.Choices);
         return choices;
     }
 
     /// <summary>保存したIDに対応する表示名を返し、現在のモデルに存在しない表情を明示します。</summary>
     private string ExpressionLabel(string? id) => ExpressionOptions().FirstOrDefault(c => c.Id == id).Label
-        ?? (string.IsNullOrEmpty(id) ? "Unassigned" : "Unavailable on this avatar");
+        ?? UiText.Get(string.IsNullOrEmpty(id) ? "Unassigned" : "Unavailable on this avatar");
 
     /// <summary>現在編集中のボタンの設定を取得し、未設定時は押下中のみの空設定を返します。</summary>
     private ExpressionBinding GetExpressionBinding(ExpressionButton button) =>
@@ -951,49 +970,54 @@ internal sealed class SettingsPanel
     /// <summary>表情ボタン一覧または表情選択画面を表示します。</summary>
     private void UpdateExpressionText()
     {
-        if (_expressionConfig == null || _expressions == null) return;
-        foreach (var text in _rows) if (text != null) text.fontSize = 27f;
-        _status!.text = _expressions.Status;
-        _title!.text = "CONTROLLER EXPRESSIONS";
+        if (_expressionConfig == null || _expressions == null)
+        {
+            _title!.text = UiText.Get("CONTROLLER EXPRESSIONS");
+            _status!.text = UiText.Get("Unavailable");
+            _footer!.text = UiText.Get("Load an avatar in the game menu");
+            return;
+        }
+        foreach (var text in _rows) if (text != null) VrUi.SetFontSize(text, 27f);
+        _status!.text = UiText.Status(_expressions.Status);
+        _title!.text = UiText.Get("CONTROLLER EXPRESSIONS");
         Array.Clear(_visibleExpressions);
+        _rows[5]!.text = UiText.Get("These options do not require recalibration.");
         if (_expressionButton is { } button)
         {
             var binding = GetExpressionBinding(button);
             var options = ExpressionOptions();
             var pages = Math.Max(1, (options.Count + 2) / 3);
+            _expressionPages = pages;
             _expressionPage = Math.Min(_expressionPage, pages - 1);
-            _title.text = ExpressionControls.Label(button).ToUpperInvariant();
-            _rows[0]!.text = $"Mode: {(binding.Toggle ? "Toggle" : "Hold")}  >";
+            _title.text = UiText.Get(ExpressionControls.Label(button));
+            _rows[0]!.text = UiText.Format("Mode: {0}  >", UiText.Get(binding.Toggle ? "Toggle" : "Hold")).TrimEnd(' ', '>');
             for (var i = 0; i < 3; i++)
             {
                 var index = _expressionPage * 3 + i;
                 if (index >= options.Count) { _rows[i + 1]!.text = ""; continue; }
                 var choice = options[index];
                 _visibleExpressions[i] = choice.Id;
-                _rows[i + 1]!.text = (choice.Id == binding.Expression ? "[Selected] " : "") + choice.Label;
+                _rows[i + 1]!.text = (choice.Id == binding.Expression ? UiText.Get("[Selected] ") : "") + choice.Label;
             }
-            _rows[4]!.text = $"Next expressions  >  {_expressionPage + 1}/{pages}";
-            _rows[5]!.text = "Back to buttons";
+            _status!.text += " | " + PageLabel(_expressionPage, pages);
             var available = (_expressionInput.Available & (1 << (int)button)) != 0;
-            _footer!.text = $"Current: {ExpressionLabel(binding.Expression)}\n" +
-                (!_expressionConfig.ExpressionsEnabled ? "Enable Expressions on the previous page to preview" :
+            _footer!.text = UiText.Format("Current: {0}\n", ExpressionLabel(binding.Expression)) +
+                UiText.Get(!_expressionConfig.ExpressionsEnabled ? "Enable Expressions on the previous page to preview" :
                     available ? "Press the assigned button to preview in the mirror" : "Button unavailable: check controller connection / input support");
         }
         else
         {
-            _rows[0]!.text = $"Expressions: {(_expressionConfig.ExpressionsEnabled ? "ON" : "OFF")}";
+            _rows[0]!.text = UiText.Format("Expressions: {0}", UiText.OnOff(_expressionConfig.ExpressionsEnabled));
             for (var i = 0; i < 3; i++)
             {
                 var candidate = (ExpressionButton)(_expressionHand * 3 + i);
                 var binding = GetExpressionBinding(candidate);
-                _rows[i + 1]!.text = $"{ExpressionControls.Label(candidate)}  >\n{ExpressionLabel(binding.Expression)}";
-                _rows[i + 1]!.fontSize = 24f;
+                _rows[i + 1]!.text = $"{UiText.Get(ExpressionControls.Label(candidate))}\n{ExpressionLabel(binding.Expression)}";
+                VrUi.SetFontSize(_rows[i + 1]!, 24f);
             }
-            _rows[4]!.text = $"Show {(_expressionHand == 0 ? "RIGHT" : "LEFT")} controller  >";
-            _rows[5]!.text = "Back to settings";
-            _footer!.text = "Hold = while pressed | Toggle = press again to release\nGame actions on assigned buttons also run";
+            _rows[4]!.text = UiText.Format("Show {0} controller  >", UiText.Get(_expressionHand == 0 ? "RIGHT" : "LEFT")).TrimEnd(' ', '>');
+            _footer!.text = UiText.Get("Hold = while pressed | Toggle = press again to release\nGame actions on assigned buttons also run");
         }
-        _rows[6]!.text = "Close panel";
     }
 
     /// <summary>表情画面の押下を処理し、変更があれば保存要求を返します。</summary>
@@ -1011,8 +1035,6 @@ internal sealed class SettingsPanel
                 _expressionConfig.ExpressionBindings[button.ToString()] = binding with { Expression = id };
             else
             {
-                if (row == 4) _expressionPage = (_expressionPage + 1) % Math.Max(1, (ExpressionOptions().Count + 2) / 3);
-                if (row == 5) _expressionButton = null;
                 return PanelCommand.None;
             }
             return PanelCommand.ExpressionsChanged;
@@ -1028,54 +1050,7 @@ internal sealed class SettingsPanel
             _expressionPage = 0;
         }
         if (row == 4) _expressionHand = 1 - _expressionHand;
-        if (row == 5) _expressionScreen = false;
         return PanelCommand.None;
-    }
-
-    /// <summary>
-    /// 部位一覧または個体選択ページを、割り当てと確認待ち状態に合わせて更新します。
-    /// </summary>
-    /// <param name="tracking">デバイス一覧・割り当て・追跡情報を提供する管理オブジェクト。</param>
-    private void UpdateRoleText(Tracking tracking)
-    {
-        foreach (var text in _rows) if (text != null) text.fontSize = 27f;
-        if (_selectedRole is { } selected)
-        {
-            _title!.text = $"ASSIGN: {TrackerRoles.Label(selected).ToUpperInvariant()}";
-            var devices = tracking.GetTelemetry();
-            var pages = Math.Max(1, (devices.Count + 2) / 3);
-            _devicePage = Math.Min(_devicePage, pages - 1);
-            _status!.text = $"Move the device to identify it | Page {_devicePage + 1}/{pages}";
-            for (var row = 0; row < 3; row++)
-            {
-                var index = _devicePage * 3 + row;
-                _visibleDeviceKeys[row] = index < devices.Count ? devices[index].Device.Key : null;
-                _rows[row]!.fontSize = 22f;
-                if (index >= devices.Count) { _rows[row]!.text = ""; continue; }
-                var d = devices[index];
-                var confirm = _armedDeviceKey == d.Device.Key && Time.unscaledTime <= _armedRoleUntil;
-                _rows[row]!.text = $"{d.Source} #{d.Id}  {d.Serial}  {(confirm ? "CONFIRM" : MotionLabel(d))}\n{d.Name}";
-            }
-            _rows[3]!.text = "Next device page  >";
-            _rows[4]!.text = "CLEAR / USE GAME DEFAULT";
-            _rows[5]!.text = "Back to roles";
-            _footer!.text = "Choose the same device twice to confirm\nA device can belong to one role only";
-        }
-        else
-        {
-            _title!.text = "TRACKER ROLES";
-            _status!.text = $"Choose a body part | Page {_rolePage + 1}/{TrackerRoles.All.Length / 3}";
-            for (var row = 0; row < 3; row++)
-            {
-                var role = TrackerRoles.All[_rolePage * 3 + row];
-                _rows[row]!.text = $"{TrackerRoles.Label(role)}  >\n{tracking.AssignmentUiLabel(role)}";
-            }
-            _rows[3]!.text = _armedDeviceKey == "AUTO" && Time.unscaledTime <= _armedRoleUntil ? "AUTO: CONFIRM (stand facing mirror)" : "AUTO: suggest waist / ankles / toes";
-            _rows[4]!.text = "Next body parts  >";
-            _rows[5]!.text = _calibrationScreen ? "Back to calibration" : "Back to settings";
-            _footer!.text = tracking.AssignmentStatus;
-        }
-        _rows[6]!.text = "Close panel";
     }
 
     /// <summary>
@@ -1092,21 +1067,20 @@ internal sealed class SettingsPanel
         bool cameraGuideUnavailable, bool shadowsOff, bool lightsOff,
         bool avatarHmdAvailable, bool avatarVisibleInHmd)
     {
-        _title!.text = "VISUAL OPTIONS";
-        _status!.text = !cameraGuideEnabled ? "Camera guide: OFF" :
-            cameraGuideUnavailable ? "Camera guide: unavailable (see log)" : _cameraGuideStatus;
-        for (var i = 0; i < _rows.Length; i++) _rows[i]!.fontSize = 31f;
-        _rows[0]!.text = $"Camera guide in headset: {(cameraGuideEnabled ? "ON" : "OFF")}";
-        _rows[1]!.text = $"VRM cast/receive shadows: {(shadowsOff ? "OFF" : "ON")}";
-        _rows[2]!.text = $"VRM lights: {(lightsOff ? "OFF" : "ON")}";
+        _title!.text = UiText.Get("VISUAL OPTIONS");
+        _status!.text = UiText.Status(!cameraGuideEnabled ? "Camera guide: OFF" :
+            cameraGuideUnavailable ? "Camera guide: unavailable (see log)" : _cameraGuideStatus);
+        for (var i = 0; i < _rows.Length; i++) VrUi.SetFontSize(_rows[i]!, 31f);
+        _rows[0]!.text = UiText.Format("Camera guide in headset: {0}", UiText.OnOff(cameraGuideEnabled));
+        _rows[1]!.text = UiText.Format("VRM cast/receive shadows: {0}", UiText.OnOff(!shadowsOff));
+        _rows[2]!.text = UiText.Format("VRM lights: {0}", UiText.OnOff(!lightsOff));
         _rows[3]!.text = avatarHmdAvailable
-            ? $"VRM in headset: {(avatarVisibleInHmd ? "ON" : "OFF")}" 
-            : "VRM in headset: load an avatar";
-        _rows[4]!.text = _roleScreen ? "Back to tracker roles" :
-            _calibrationScreen ? "Back to calibration" : "Back to settings";
-        _rows[5]!.text = cameraGuideEnabled && captureCameraFound ? _cameraGuideLocation : "";
-        _rows[6]!.text = "Close panel";
-        _footer!.text = "Cyan sphere marks the camera; visual options are shared";
+            ? UiText.Format("VRM in headset: {0}", UiText.OnOff(avatarVisibleInHmd))
+            : UiText.Get("VRM in headset: load an avatar");
+        _rows[4]!.text = UiText.Get("Panel & feedback");
+        _rows[5]!.text = cameraGuideEnabled && captureCameraFound ? UiText.Status(_cameraGuideLocation) : "";
+        _footer!.text = UiText.Get("Cyan sphere marks the camera; visual options are shared") + "\n" +
+            UiText.Get("These options do not require recalibration.");
     }
 
     /// <summary>
@@ -1116,18 +1090,34 @@ internal sealed class SettingsPanel
     private void UpdateDashboardText(Tracking tracking)
     {
         var trackers = tracking.GetTelemetry();
-        _dashboardPages = Math.Max(1, (trackers.Count + 4) / 5);
+        var pageSize = _uiConfig.UiTrackerDetails ? 1 : 3;
+        _dashboardPages = Math.Max(1, (trackers.Count + pageSize - 1) / pageSize);
         _dashboardPage = Math.Min(_dashboardPage, _dashboardPages - 1);
         _dashboardStatus!.text =
-            $"{trackers.Count} devices  |  Page {_dashboardPage + 1}/{_dashboardPages}";
+            UiText.Format("{0} devices  |  Page {1}/{2}", trackers.Count, _dashboardPage + 1, _dashboardPages) +
+            (_uiConfig.UiTrackerDetails ? "\n" + UiText.Get("Raw coordinates: compare only within the same API") : "");
         for (var i = 0; i < _dashboardRows.Length; i++)
         {
-            var index = _dashboardPage * 5 + i;
+            var index = _dashboardPage * pageSize + i;
+            var visible = i < pageSize;
+            _dashboardRows[i]!.gameObject.SetActive(visible);
+            _dashboardCards[i]!.gameObject.SetActive(visible);
+            if (!visible) continue;
+            var y = _uiConfig.UiTrackerDetails ? -50f : 100f - i * 150f;
+            var height = _uiConfig.UiTrackerDetails ? 460f : 142f;
+            _dashboardCards[i]!.rectTransform.sizeDelta = new(630, height);
+            _dashboardCards[i]!.rectTransform.anchoredPosition = new(0, y);
+            _dashboardRows[i]!.rectTransform.sizeDelta = new(600, height - 8);
+            _dashboardRows[i]!.rectTransform.anchoredPosition = new(0, y);
+            VrUi.SetFontSize(_dashboardRows[i]!, 27f);
+            _dashboardRows[i]!.enableWordWrapping = true;
             _dashboardRows[i]!.text = index < trackers.Count
                 ? FormatDashboardLine(tracking, trackers[index])
-                : i == 0 ? "No active tracker found" : "";
+                : i == 0 ? UiText.Get("No active tracker found") : "";
+            _dashboardCards[i]!.color = index < trackers.Count && IsMoving(trackers[index].Device.Key)
+                ? new Color(.12f, .35f, .43f, 1f) : new Color(.08f, .10f, .23f, 1f);
         }
-        _dashboardNextText!.text = _dashboardPages > 1 ? "Next tracker page  >" : "All trackers shown";
+        _dashboardNextText!.text = UiText.Get("Next page");
     }
 
     /// <summary>
@@ -1138,20 +1128,18 @@ internal sealed class SettingsPanel
     /// <returns>個体情報・座標・速度、または追跡喪失の表示文。</returns>
     private string FormatDashboardLine(Tracking tracking, TrackerTelemetry tracker)
     {
-        var model = string.IsNullOrWhiteSpace(tracker.Name) ? "(unknown model)" : tracker.Name;
-        var serial = string.IsNullOrWhiteSpace(tracker.Serial) ? "(no serial)" : tracker.Serial;
+        var model = string.IsNullOrWhiteSpace(tracker.Name) ? UiText.Get("(unknown model)") : tracker.Name;
+        var serial = string.IsNullOrWhiteSpace(tracker.Serial) ? UiText.Get("(no serial)") : tracker.Serial;
         var key = tracker.Device.Key;
-        if (!tracker.HasPose)
-        {
-            _lastSamples.Remove(key);
-            return $"{tracker.Source} #{tracker.Id}  {model}\nS/N {serial}\nTracking lost";
-        }
-        var speed = UpdateTrackerSpeed(key, tracker.Pose);
+        var state = MotionLabel(tracker);
+        var text = $"{tracker.Source} #{tracker.Id}  [{UiText.Get(state)}]\nS/N {serial}\n{model}";
+        if (!_uiConfig.UiTrackerDetails || !tracker.HasPose) return text;
+        var speed = _lastSamples.TryGetValue(key, out var sample) ? sample.Speed : 0f;
         var position = tracker.Position;
-        return $"{tracker.Source} #{tracker.Id}  {model}\nS/N {serial}\n" +
-            $"X {position.x:+0.00;-0.00;0.00}  Y {position.y:+0.00;-0.00;0.00}  " +
-            $"Z {position.z:+0.00;-0.00;0.00} m  {speed:0.00}m/s" +
-            (IsMoving(key) ? " MOVING" : "");
+        return text + "\n\n" +
+            $"X {position.x:+0.00;-0.00;0.00}  Y {position.y:+0.00;-0.00;0.00}  Z {position.z:+0.00;-0.00;0.00} m\n" +
+            $"{speed:0.00} m/s";
+
     }
 
     /// <summary>
@@ -1210,37 +1198,24 @@ internal sealed class SettingsPanel
         if (open)
         {
             if (camera == null) return;
-            _inputArmed = false;
-            var horizontal = Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up).normalized;
-            if (horizontal.sqrMagnitude < 0.01f) horizontal = Vector3.forward;
+            _input.Block();
             if (_calibrationScreen) _calibrationForward = _directionGuide.Begin(camera);
             else _directionGuide.Hide();
-            var placement = _panelPose ?? new Pose(camera.transform.position + horizontal * 1.4f,
-                Quaternion.LookRotation(horizontal, Vector3.up));
-            _root.transform.SetPositionAndRotation(placement.Position, placement.Rotation);
+            _placement ??= DefaultPlacement(camera);
+            ApplyAppearance();
             _dashboardPage = 0;
             _lastSamples.Clear();
             _nextTextUpdate = 0f;
-            _closeHoldStart = -1f;
-            _emptyAreaHoldStart = -1f;
         }
         _root.SetActive(open);
         if (open) return;
         _directionGuide.Hide();
         _ghostGuide.Hide();
-        _calibrationScreen = false;
-        _roleScreen = false;
-        _selectedRole = null;
-        _armedDeviceKey = null;
-        _visualScreen = false;
-        _armedRoleRow = -1;
-        _expressionScreen = false;
-        _expressionButton = null;
-        Array.Clear(_visibleExpressions);
+        _navigation.Open(false);
+        _input.Block();
+        DiscardSelection();
         _dashboardPage = 0;
         _lastSamples.Clear();
-        _closeHoldStart = -1f;
-        _emptyAreaHoldStart = -1f;
         ClearCalibrationResult();
         _waistHeightStatus = "";
         for (var i = 0; i < 3; i++)
@@ -1263,42 +1238,8 @@ internal sealed class SettingsPanel
         if (visible) cursor.rectTransform.anchoredPosition = new Vector2(point.x, point.y);
     }
 
-    /// <summary>
-    /// パネルローカル座標から、操作行の当たり判定を行います。
-    /// </summary>
-    /// <param name="point">Canvasローカル座標で表した交点。XとYはUIピクセルです。</param>
-    /// <returns>該当行の0始まりインデックス。範囲外なら-1。</returns>
-    private int HitRow(Vector3 point)
-    {
-        if (Mathf.Abs(point.x + 340f) > 410f) return -1;
-        // The bottom action remains easy to hit when the HMD gaze jitters.
-        if (point.y <= -196f && point.y >= -310f) return 6;
-        for (var i = 0; i < RowY.Length - 1; i++)
-            if (Mathf.Abs(point.y - RowY[i]) < 35f) return i;
-        return -1;
-    }
-
-    /// <summary>
-    /// LIVE TRACKERSのページ送り領域に当たるかを判定します。
-    /// </summary>
-    /// <param name="point">Canvasローカル座標で表した交点。XとYはUIピクセルです。</param>
-    /// <returns>複数ページがあり、有効なページ送り領域内ならtrue。</returns>
-    private bool HitDashboardNext(Vector3 point)
-    {
-        if (_visualScreen || _dashboardPages <= 1) return false;
-        return Mathf.Abs(point.x - 445f) < 315f && Mathf.Abs(point.y + 282f) < 31f;
-    }
-
-    /// <summary>
-    /// LIVE TRACKERS下の描画設定ボタンに当たるかを判定します。
-    /// </summary>
-    /// <param name="point">Canvasローカル座標で表した交点。XとYはUIピクセルです。</param>
-    /// <returns>描画設定画面以外で、有効なボタン領域内ならtrue。</returns>
-    private bool HitDashboardVisual(Vector3 point)
-    {
-        if (_visualScreen) return false;
-        return Mathf.Abs(point.x - 445f) < 315f && Mathf.Abs(point.y + 348f) < 28f;
-    }
+    /// <summary>描画と共通の矩形・有効状態から操作対象を取得します。</summary>
+    private int HitControl(Vector3 point) => PanelControls.Hit(_controls, point.x, point.y);
 
     /// <summary>
     /// コントローラー前方のレイをパネルへ投影し、操作可能な交点を取得します。

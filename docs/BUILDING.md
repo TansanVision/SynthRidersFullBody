@@ -37,6 +37,8 @@ SynthRidersFullBody/
 
 v0.51.0の表情操作は `Il2CppVRM.dll` と `Il2CppVRM10.dll` も参照します。足りない場合はゲームPCで生成された `Il2CppAssemblies` フォルダー全体をコピーしてください。
 
+v0.58.1の欠字対策は `UnityEngine.TextCoreFontEngineModule.dll` も使用します。同じ生成済みフォルダーのDLLを参照し、配布用MODへUnity DLLやOSフォントを同梱しないでください。
+
 ```powershell
 dotnet build .\SynthRidersFullBody.sln -c Release
 ```

@@ -2,7 +2,7 @@ using MelonLoader;
 using Il2CppSynth.Avatars;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.51.0", "SynthRidersFullBody")]
+[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.58.1", "SynthRidersFullBody")]
 
 namespace SynthRidersFullBody;
 
@@ -46,7 +46,8 @@ public sealed class FullBodyMod : MelonMod
     private string _lastTrackingError = "";
     private float _nextConfigErrorLog;
     private float _nextVisualErrorLog;
-    private string _lastCaptureCameraStatus = "";
+    private float _nextHeadsetVisibilityErrorLog;
+    private string _lastCaptureCameraDiagnosticKey = "";
     private bool _calibrationRequired;
     private CalibrationSession? _sessionCalibration;
     private readonly CalibrationRecoveryGate _recoveryGate = new();
@@ -73,6 +74,7 @@ public sealed class FullBodyMod : MelonMod
                 _configPath = null;
             }
             _tracking = new Tracking(_config);
+            _panel.SetUiConfiguration(_config);
             TrySaveConfig();
             LoggerInstance.Msg($"Configuration: {_configPath ?? "session defaults"}");
             LoggerInstance.Msg($"Avatar correction: 1€ filter={_config.SmoothingEnabled}, " +
@@ -111,6 +113,7 @@ public sealed class FullBodyMod : MelonMod
         catch { /* Unity objects may already be destroyed during shutdown. */ }
         try { _menuButton.ResetUi(); }
         catch { /* Unity objects may already be destroyed during shutdown. */ }
+        UiLocalization.Clear();
     }
 
     /// <summary>
@@ -144,6 +147,7 @@ public sealed class FullBodyMod : MelonMod
             return;
         try
         {
+            UiLocalization.Update();
             var camera = FindHeadCamera();
             if (camera == null)
             {
@@ -237,23 +241,29 @@ public sealed class FullBodyMod : MelonMod
             try
             {
                 if (_avatarHmdVisibility.ApplySaved(_config))
-                    LoggerInstance.Msg("Saved VRM headset visibility reapplied.");
+                    LoggerInstance.Msg($"Saved VRM headset visibility reapplied. {_avatarHmdVisibility.LastApplication}");
+                if (_avatarHmdVisibility.Error != null && Time.unscaledTime >= _nextHeadsetVisibilityErrorLog)
+                {
+                    LoggerInstance.Warning($"VRM headset visibility update failed: {_avatarHmdVisibility.Error}");
+                    _nextHeadsetVisibilityErrorLog = Time.unscaledTime + 30f;
+                }
             }
             catch (Exception exception)
             {
-                if (Time.unscaledTime >= _nextVisualErrorLog)
+                if (Time.unscaledTime >= _nextHeadsetVisibilityErrorLog)
                 {
                     LoggerInstance.Warning($"VRM headset visibility update failed: {exception}");
-                    _nextVisualErrorLog = Time.unscaledTime + 30f;
+                    _nextHeadsetVisibilityErrorLog = Time.unscaledTime + 30f;
                 }
             }
             try
             {
                 _captureCameraGuide.Update(camera, _config.ShowCaptureCameraGuide);
-                if (_lastCaptureCameraStatus != _captureCameraGuide.Status)
+                var cameraDiagnosticKey = $"{camera.GetInstanceID()}|{_captureCameraGuide.DiagnosticKey}";
+                if (_lastCaptureCameraDiagnosticKey != cameraDiagnosticKey)
                 {
-                    _lastCaptureCameraStatus = _captureCameraGuide.Status;
-                    LoggerInstance.Msg($"Capture camera guide: {_lastCaptureCameraStatus}.");
+                    _lastCaptureCameraDiagnosticKey = cameraDiagnosticKey;
+                    LoggerInstance.Msg($"Capture camera guide: {_captureCameraGuide.Status}.");
                     if (_config.ShowCaptureCameraGuide)
                         LoggerInstance.Msg($"Capture camera diagnostics: {_captureCameraGuide.Diagnostics(camera)}");
                 }
@@ -286,6 +296,7 @@ public sealed class FullBodyMod : MelonMod
             var right = frame.Right;
             if (!frame.HasWaist) _poseFilter.Reset();
             else _avatar?.RecordRawWaist(waist);
+            _panel.SetCalibrationRequired(_calibrationRequired);
             _panel.SetBodyDiagnostics(!_config.Enabled ? "Body IK: OFF" :
                 _avatar == null ? "Body IK: avatar missing" :
                 _recoveryPending ? "Body IK: restoring saved calibration..." :
@@ -310,13 +321,14 @@ public sealed class FullBodyMod : MelonMod
                 {
                     var action = _menuButton.Tick(camera, trigger, leftPointer,
                         rightPointer, _panel, _calibrationRequired);
+                    if (action != AvatarMenuAction.None) _panel.PlayFeedback(_tracking, _menuButton.ActivationHand);
                     if (_lastMenuPlacement != _menuButton.Placement)
                     {
                         _lastMenuPlacement = _menuButton.Placement;
                         LoggerInstance.Msg($"Full body menu placement: {_lastMenuPlacement}.");
                     }
                     if (action == AvatarMenuAction.Settings)
-                        _panel.OpenSettings(camera, _menuButton.PanelPose(camera));
+                        _panel.OpenSettings(camera, _menuButton.PanelReference(camera));
                     else if (action == AvatarMenuAction.Calibrate)
                         OpenCalibration(camera);
                 }
@@ -391,7 +403,7 @@ public sealed class FullBodyMod : MelonMod
             UpdateExpressions();
             if (_calibrationEnd > 0f)
             {
-                if (!_panel.IsCalibrationScreen)
+                if (!_panel.IsCalibrationCountingDown)
                 {
                     _calibrationEnd = 0f;
                     _calibrationSampler.Reset();
@@ -442,6 +454,7 @@ public sealed class FullBodyMod : MelonMod
                     {
                         var reason = roleError ?? (!tPose.Ready
                             ? tPose.Status : !stable ? stabilityReason : _avatar?.IkError ?? "check devices/avatar");
+                        _avatar?.HideTPosePreview();
                         _panel.FinishCalibration($"Calibration failed: {reason}", false, tPose.Warning);
                         LoggerInstance.Warning($"Full body calibration failed: {reason}.");
                         LogCalibrationDiagnostics(camera, frame, "failed");
@@ -455,7 +468,7 @@ public sealed class FullBodyMod : MelonMod
             }
 
             var driveAvatar = !_calibrationRequired &&
-                (!_panel.IsCalibrationScreen || _panel.IsCalibrationSucceeded) &&
+                !_panel.ShowCalibrationPose &&
                 _config.Enabled && frame.HasWaist && _avatar != null &&
                 _avatar.Animator != null && _avatar.Animator.gameObject.activeInHierarchy;
             _avatar?.UpdateTrackingState(driveAvatar, frame.HasLeft, frame.HasRight);
@@ -535,6 +548,12 @@ public sealed class FullBodyMod : MelonMod
         if (_tracking == null || _config == null || command == PanelCommand.None) return;
         switch (command)
         {
+            case PanelCommand.RepositionUi:
+                _panel.Reposition(_menuButton.PanelReference(camera), camera);
+                return;
+            case PanelCommand.UiPreferencesChanged:
+                TrySaveConfig();
+                return;
             case PanelCommand.ExpressionsChanged:
                 ResetExpressions(false);
                 TrySaveConfig();
@@ -543,8 +562,13 @@ public sealed class FullBodyMod : MelonMod
             case PanelCommand.Recalibrate:
                 OpenCalibration(camera);
                 return;
-            case PanelCommand.StartCalibration:
+            case PanelCommand.PrepareCalibration:
                 InvalidateCalibration();
+                _panel.SelectCalibrationPose();
+                return;
+            case PanelCommand.StartCalibration:
+                if (!_panel.BeginCalibrationCountdown()) return;
+                InvalidateCalibration(false);
                 if (!_tracking.CaptureWorldAnchor(camera))
                 {
                     _panel.FinishCalibration("Calibration failed: HMD pose unavailable", false);
@@ -557,7 +581,7 @@ public sealed class FullBodyMod : MelonMod
                 return;
             case PanelCommand.TogglePoseMode:
                 _panel.TogglePoseMode();
-                InvalidateCalibration();
+                InvalidateCalibration(false);
                 LoggerInstance.Msg($"Calibration pose: {(_panel.UseTPose ? "T-pose" : "standing")}.");
                 return;
             case PanelCommand.ToggleTracking: _config.Enabled = !_config.Enabled; break;
@@ -567,7 +591,9 @@ public sealed class FullBodyMod : MelonMod
                 LoggerInstance.Msg($"Ultimate Tracker 180 correction: {(_config.UltimateTrackerRotate180 ? "ON" : "OFF")}; recalibration required.");
                 break;
             case PanelCommand.ToggleCameraGuide:
-                _config.ShowCaptureCameraGuide = !_config.ShowCaptureCameraGuide; break;
+                _config.ShowCaptureCameraGuide = !_config.ShowCaptureCameraGuide;
+                _captureCameraGuide.RequestRescan();
+                break;
             case PanelCommand.ToggleAvatarShadows:
                 _config.DisableAvatarShadows = !_config.DisableAvatarShadows; break;
             case PanelCommand.ToggleAvatarLights:
@@ -576,11 +602,12 @@ public sealed class FullBodyMod : MelonMod
                 if (_avatarHmdVisibility.TryToggle(_config))
                 {
                     TrySaveConfig();
-                    LoggerInstance.Msg("VRM headset visibility toggle requested.");
+                    LoggerInstance.Msg($"VRM headset visibility applied. {_avatarHmdVisibility.LastApplication}");
                 }
                 else LoggerInstance.Warning("VRM headset visibility could not be changed; " +
-                    "check whether an avatar is loaded.");
+                    _avatarHmdVisibility.Error);
                 return;
+            case PanelCommand.CancelCalibration:
             case PanelCommand.Close:
                 _calibrationEnd = 0f;
                 _calibrationSampler.Reset();
@@ -668,7 +695,8 @@ public sealed class FullBodyMod : MelonMod
     /// <summary>
     /// 保存した校正と追跡原点を破棄し、明示的な再校正が必要な状態へ戻します。
     /// </summary>
-    private void InvalidateCalibration()
+    /// <param name="resetPanel">外部変更時は準備画面へ戻します。明示的な計測開始・姿勢選択時は段階を保持します。</param>
+    private void InvalidateCalibration(bool resetPanel = true)
     {
         _sessionCalibration = null;
         _recoveryPending = _rebaseOnRecovery = false;
@@ -678,7 +706,7 @@ public sealed class FullBodyMod : MelonMod
         _calibrationEnd = 0f;
         _calibrationSampler.Reset();
         _poseFilter.Reset();
-        _panel.ClearCalibrationResult();
+        if (resetPanel) _panel.ClearCalibrationResult();
         _avatar?.ResetCalibration(true);
     }
 
@@ -744,16 +772,16 @@ public sealed class FullBodyMod : MelonMod
     }
 
     /// <summary>
-    /// 既存プレビューと校正を解除し、固定した正面・パネル位置で校正画面を開きます。
+    /// 固定した正面・パネル位置で準備画面を開きます。姿勢選択へ進むまでは既存の校正を維持します。
     /// </summary>
     /// <param name="camera">ゲーム内のHMD視点として使用するカメラ。</param>
     private void OpenCalibration(Camera camera)
     {
-        // The entry button also works while the calibration panel is open.
-        // End the old preview before establishing a new origin/direction.
+        // Merely checking readiness must not discard a working calibration.
         _avatar?.HideTPosePreview();
-        InvalidateCalibration();
-        _panel.OpenCalibration(camera, _menuButton.PanelPose(camera));
+        _calibrationEnd = 0f;
+        _calibrationSampler.Reset();
+        _panel.OpenCalibration(camera, _menuButton.PanelReference(camera));
         LoggerInstance.Msg($"Calibration front: {_panel.CalibrationDirectionSource}; " +
             $"direction={_panel.CalibrationForward}.");
     }

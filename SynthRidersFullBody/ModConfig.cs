@@ -48,6 +48,21 @@ public sealed class ModConfig
     /// 対象アバター配下のライトを無効にするかを指定します。
     /// </summary>
     public bool DisableAvatarLights { get; set; }
+    /// <summary>文字と操作ボタンを15%拡大します。全アバター共通です。</summary>
+    public bool UiLargeText { get; set; }
+    private float _uiPanelDistance = 1.4f;
+    /// <summary>開くときのパネル距離（m）。1.1〜1.8mの範囲で保存します。</summary>
+    public float UiPanelDistance
+    {
+        get => _uiPanelDistance;
+        set => _uiPanelDistance = float.IsFinite(value) ? Math.Clamp(value, 1.1f, 1.8f) : 1.4f;
+    }
+    /// <summary>対応する操作元コントローラーへ短い振動を返します。</summary>
+    public bool UiHaptics { get; set; } = true;
+    /// <summary>短い操作音を有効にします。初期状態では無効です。</summary>
+    public bool UiSound { get; set; }
+    /// <summary>LIVE TRACKERSへ取得元ごとの生座標・速度を表示します。</summary>
+    public bool UiTrackerDetails { get; set; }
     /// <summary>
     /// アバター識別キーごとの一人称表示希望値です。
     /// </summary>

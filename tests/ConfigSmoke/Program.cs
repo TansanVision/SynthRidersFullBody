@@ -14,6 +14,13 @@ try
     Check(!config.UltimateTrackerRotate180, "Ultimate rotation must be opt-in for existing aligned environments.");
     Check(!config.ExpressionsEnabled && config.ExpressionBindings.Count == 0,
         "Expression buttons must be opt-in and initially unassigned.");
+    Check(!config.UiLargeText && config.UiPanelDistance == 1.4f && config.UiHaptics && !config.UiSound && !config.UiTrackerDetails,
+        "UI defaults changed unexpectedly.");
+    config.UiLargeText = true;
+    config.UiPanelDistance = 1.7f;
+    config.UiSound = true;
+    config.UiHaptics = false;
+    config.UiTrackerDetails = true;
     config.ExpressionsEnabled = true;
     config.ExpressionBindings["LeftPrimary"] = new() { Expression = "preset:happy" };
     config.ExpressionBindings["RightSecondary"] = new() { Expression = "custom:Smile", Toggle = true };
@@ -25,6 +32,8 @@ try
     config.AvatarVisibleInHeadset["file:example.vrm"] = false;
     config.Save(path);
     var reloaded = ModConfig.Load(path);
+    Check(reloaded.UiLargeText && reloaded.UiPanelDistance == 1.7f && reloaded.UiSound && !reloaded.UiHaptics && reloaded.UiTrackerDetails,
+        "Shared UI preferences did not survive saving and reloading.");
     Check(reloaded.ExpressionsEnabled && reloaded.ExpressionBindings["LeftPrimary"].Expression == "preset:happy" &&
         !reloaded.ExpressionBindings["LeftPrimary"].Toggle &&
         reloaded.ExpressionBindings["RightSecondary"] == config.ExpressionBindings["RightSecondary"],
