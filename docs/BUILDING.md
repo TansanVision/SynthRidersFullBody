@@ -39,6 +39,8 @@ v0.51.0の表情操作は `Il2CppVRM.dll` と `Il2CppVRM10.dll` も参照しま�
 
 v0.58.1の欠字対策は `UnityEngine.TextCoreFontEngineModule.dll` も使用します。同じ生成済みフォルダーのDLLを参照し、配布用MODへUnity DLLやOSフォントを同梱しないでください。
 
+v0.58.2のHMD表示設定は、ゲームの設定クラスの継承元を解決するため `Il2CppPhotonUnityNetworking.dll` も参照します。同じ `Il2CppAssemblies` 内のDLLを使用し、MODのZIPには同梱しません。
+
 ```powershell
 dotnet build .\SynthRidersFullBody.sln -c Release
 ```
@@ -75,11 +77,12 @@ dotnet build .\SynthRidersFullBody.sln -c Release -p:MelonDir="C:\SynthRidersRef
 
 ライセンス・第三者表記のテキストもビルド出力へコピーします。配布ZIPを作る方法は [公開・配布手順](PUBLISHING.md) を参照してください。
 
-ゲーム参照DLLを使わない計算・設定テストは、次で実行できます。
+ゲーム参照DLLを使わない計算・設定・模擬描画イベントのテストは、次で実行できます。
 
 ```powershell
 dotnet run --project .\tests\AvatarPoseMath\AvatarPoseMath.csproj -c Release
 dotnet run --project .\tests\ConfigSmoke\ConfigSmoke.csproj -c Release
+dotnet run --project .\tests\MenuBustCamera\MenuBustCamera.csproj -c Release
 ```
 
 ビルドや上記テストの成功は、VR機器での動作確認を意味しません。実機確認は [チェックリスト](../REAL_DEVICE_CHECKLIST.md) を使用してください。

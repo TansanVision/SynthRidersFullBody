@@ -25,6 +25,7 @@
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.XRModule.dll')" Text="UnityEngine.XRModule.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.TextRenderingModule.dll')" Text="UnityEngine.TextRenderingModule.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.TextCoreFontEngineModule.dll')" Text="UnityEngine.TextCoreFontEngineModule.dll is missing. Copy the game's complete generated Il2CppAssemblies folder; localized UI fonts use its font engine." />
+    <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Il2CppPhotonUnityNetworking.dll')" Text="Il2CppPhotonUnityNetworking.dll is missing. Copy the game's complete generated Il2CppAssemblies folder; the game's view settings provider inherits from this assembly." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\UnityEngine.UI.dll')" Text="UnityEngine.UI.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Unity.TextMeshPro.dll')" Text="Unity.TextMeshPro.dll is missing from $(UnityAssembliesDir)." />
     <Error Condition="'$(UnityAssembliesDir)' != '' and !Exists('$(UnityAssembliesDir)\Assembly-CSharp.dll')" Text="The game's generated Assembly-CSharp.dll is missing from $(UnityAssembliesDir)." />
@@ -57,6 +58,7 @@
     <Reference Include="$(UnityAssembliesDir)\UnityEngine.UI.dll" Condition="Exists('$(UnityAssembliesDir)\UnityEngine.UI.dll')"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\Unity.TextMeshPro.dll" Condition="Exists('$(UnityAssembliesDir)\Unity.TextMeshPro.dll')"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\Assembly-CSharp.dll" Condition="Exists('$(UnityAssembliesDir)\Assembly-CSharp.dll')"><Private>false</Private></Reference>
+    <Reference Include="$(UnityAssembliesDir)\Il2CppPhotonUnityNetworking.dll"><Private>false</Private></Reference>
     <Reference Include="$(UnityAssembliesDir)\Assembly-CSharp-firstpass.dll" Condition="Exists('$(UnityAssembliesDir)\Assembly-CSharp-firstpass.dll')"><Private>false</Private></Reference>
   </ItemGroup>
 </Project>

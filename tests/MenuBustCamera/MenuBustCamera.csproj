@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../SynthRidersFullBody/MenuBustCamera.cs" Link="MenuBustCamera.cs" />
+    <Compile Include="../../SynthRidersFullBody/MenuBustFraming.cs" Link="MenuBustFraming.cs" />
+  </ItemGroup>
+</Project>

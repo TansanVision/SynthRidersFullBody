@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace SynthRidersFullBody;
 
-// Uses the game's per-avatar first-person setting instead of changing model layers.
+// Synchronizes the native global view setting and per-avatar settings before refreshing the native view.
 /// <summary>
 /// ゲームの一人称表示設定を操作し、アバターごとのHMD表示設定を再適用します。
 /// </summary>
@@ -45,13 +45,13 @@ internal sealed class AvatarHmdVisibility
     /// 現在のアバターをHMD内に表示する設定かどうかを取得します。
     /// </summary>
     /// <param name="visible">取得成功時に、HMD内へ表示する設定かどうかを受け取ります。</param>
-    /// <returns>アバターの読み込みが完了し、固有設定を取得できた場合はtrue。</returns>
+    /// <returns>アバターの読み込みが完了し、共通の表示設定と固有設定を取得できた場合はtrue。</returns>
     public bool TryGet(out bool visible)
     {
         visible = false;
         var loader = FindLoader();
         if (!IsReady(loader)) return false;
-        visible = !loader!.specificSettings!.HideInFirtPersonView;
+        visible = !loader!.infoProvider!.HideInFirtPersonView;
         return true;
     }
 
@@ -76,7 +76,7 @@ internal sealed class AvatarHmdVisibility
             return false;
         }
         Bind(loader!, key, headset);
-        var desired = loader!.specificSettings!.HideInFirtPersonView;
+        var desired = loader!.infoProvider!.HideInFirtPersonView;
         if (!Apply(loader, headset, desired, "user toggle")) return false;
         config.AvatarVisibleInHeadset ??= new Dictionary<string, bool>();
         config.AvatarVisibleInHeadset[key] = desired;
@@ -107,11 +107,11 @@ internal sealed class AvatarHmdVisibility
         Bind(loader!, key, headset);
         // Never use avatar identity alone as proof that the current setting is
         // still applied: the game can reset both settings and camera in place.
-        var settingChanged = desired != !loader!.specificSettings!.HideInFirtPersonView;
+        var settingChanged = !SettingsMatch(loader!, desired);
         if (!settingChanged && _appliedVisible == desired && _appliedMask == headset.cullingMask)
             return false;
         if (Time.unscaledTime < _nextApply) return false;
-        return Apply(loader, headset, desired, settingChanged ? "saved setting changed" : "headset/view refresh");
+        return Apply(loader!, headset, desired, settingChanged ? "saved setting changed" : "headset/view refresh");
     }
 
     /// <summary>適用先が変わった場合だけ再試行待ちと前回の描画状態を解除します。</summary>
@@ -132,7 +132,7 @@ internal sealed class AvatarHmdVisibility
         _boundKey = key;
     }
 
-    /// <summary>ゲームの標準APIで設定と一人称カメラを更新し、失敗時は間隔を空けて再試行可能にします。</summary>
+    /// <summary>共通設定と個別設定に希望値を明示し、ゲームのレイヤー・表示更新を実行します。</summary>
     /// <param name="loader">対象アバターのローダー。</param>
     /// <param name="headset">対象のHMDカメラ。</param>
     /// <param name="desired">HMD内に表示する希望値。</param>
@@ -143,21 +143,30 @@ internal sealed class AvatarHmdVisibility
         _nextApply = Time.unscaledTime + 1f;
         _appliedVisible = null;
         var beforeMask = headset.cullingMask;
+        var settings = loader.specificSettings!;
+        var provider = loader.infoProvider!;
+        var beforeSpecificHide = settings.HideInFirtPersonView;
+        var beforeViewHide = provider.HideInFirtPersonView;
+        var success = false;
         try
         {
-            if (desired != !loader.specificSettings!.HideInFirtPersonView)
-                loader.ToggleAvatarsFirstPersonModel();
-            if (desired != !loader.specificSettings.HideInFirtPersonView)
+            // The menu toggle has no explicit value and is not a contract for
+            // updating specificSettings. The native view also has its own
+            // Game_InfoProvider setting; the two instances need not be shared.
+            provider.HideInFirtPersonView = !desired;
+            settings.HideInFirtPersonView = !desired;
+            if (!SettingsMatch(loader, desired))
             {
-                Error = $"Game did not accept headset visibility={desired}; avatar #{_boundAvatarId}.";
+                Error = $"Game did not accept headset visibility={desired}; {SettingDiagnostics(loader)}.";
                 return false;
             }
-            // Refresh the native view even when its boolean is already right.
-            // A recreated/reset HMD camera may still have its default mask.
+            // Initialize the native first/third-person layers as well as the
+            // view, including a new HMD whose saved boolean is already right.
+            loader.SetFirstPersonCameraLayers();
             loader.SetFirstPersonCameraView();
-            if (desired != !loader.specificSettings.HideInFirtPersonView)
+            if (!SettingsMatch(loader, desired))
             {
-                Error = $"Game reset headset visibility during view refresh; avatar #{_boundAvatarId}.";
+                Error = $"Game reset headset visibility during view refresh; {SettingDiagnostics(loader)}.";
                 return false;
             }
             _appliedVisible = desired;
@@ -165,7 +174,9 @@ internal sealed class AvatarHmdVisibility
             Error = null;
             LastApplication = $"avatar={loader.vrmObject!.name} #{_boundAvatarId}, loader=#{_boundLoaderId}, " +
                 $"visible={desired}, headset={headset.name} #{_boundHeadsetId}, " +
-                $"mask={beforeMask:X8}->{_appliedMask:X8}, reason={reason}";
+                $"mask={beforeMask:X8}->{_appliedMask:X8}, " +
+                $"hide(view/avatar)={beforeViewHide}/{beforeSpecificHide}->{!desired}/{!desired}, reason={reason}";
+            success = true;
             return true;
         }
         catch (Exception exception)
@@ -173,7 +184,35 @@ internal sealed class AvatarHmdVisibility
             Error = $"Headset visibility apply failed for avatar #{_boundAvatarId}: {exception}";
             return false;
         }
+        finally
+        {
+            if (!success)
+            {
+                // An unsuccessful click must not leave the UI flipped while
+                // the saved preference and headset are still in the old state.
+                try
+                {
+                    provider.HideInFirtPersonView = beforeViewHide;
+                    settings.HideInFirtPersonView = beforeSpecificHide;
+                    loader.SetFirstPersonCameraLayers();
+                    loader.SetFirstPersonCameraView();
+                }
+                catch { /* Keep the original failure; native view may still be unavailable. */ }
+                finally { if (headset != null) headset.cullingMask = beforeMask; }
+            }
+        }
     }
+
+    /// <summary>共通の表示フラグと現在のアバターの個別フラグが、ともに希望値へ一致しているか確認します。</summary>
+    private static bool SettingsMatch(AvatarLoader loader, bool visible) =>
+        loader.infoProvider != null && loader.specificSettings != null &&
+        loader.infoProvider.HideInFirtPersonView == !visible &&
+        loader.specificSettings.HideInFirtPersonView == !visible;
+
+    /// <summary>どちらの設定経路が不一致だったか識別できる診断文を返します。</summary>
+    private string SettingDiagnostics(AvatarLoader loader) =>
+        $"avatar #{_boundAvatarId}, viewHide={loader.infoProvider?.HideInFirtPersonView}, " +
+        $"avatarHide={loader.specificSettings?.HideInFirtPersonView}";
 
     /// <summary>読み込み中や対象不在の状態を、前回の適用完了として扱わないようにします。</summary>
     private void ResetBinding()
@@ -190,7 +229,7 @@ internal sealed class AvatarHmdVisibility
     /// <param name="loader">対象のローダー。</param>
     /// <returns>操作可能なロード済みアバターの場合はtrue。</returns>
     private static bool IsReady(AvatarLoader? loader) => HasAvatar(loader) &&
-        !loader!.avatarIsLoading && loader.hasAvatarLoaded && loader.specificSettings != null;
+        !loader!.avatarIsLoading && loader.hasAvatarLoaded && loader.specificSettings != null && loader.infoProvider != null;
 
     /// <summary>ゲームが管理する、シーン内で有効な一人称カメラを取得します。</summary>
     /// <param name="loader">対象のローダー。</param>

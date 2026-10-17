@@ -9,7 +9,7 @@ try
     Check(File.Exists(path), "Initial configuration was not created.");
     Check(config.CorrectionVersion == 4 && config.PelvisRotationWeight == 1f,
         "New configuration must prioritize the tracked waist rotation.");
-    Check(!config.ShowCaptureCameraGuide && !config.DisableAvatarShadows &&
+    Check(!config.MenuBustShot && !config.ShowCaptureCameraGuide && !config.DisableAvatarShadows &&
           !config.DisableAvatarLights, "Visual options must start disabled.");
     Check(!config.UltimateTrackerRotate180, "Ultimate rotation must be opt-in for existing aligned environments.");
     Check(!config.ExpressionsEnabled && config.ExpressionBindings.Count == 0,
@@ -26,6 +26,7 @@ try
     config.ExpressionBindings["RightSecondary"] = new() { Expression = "custom:Smile", Toggle = true };
     config.WaistSerial = "waist-123";
     config.ShowCaptureCameraGuide = true;
+    config.MenuBustShot = true;
     config.DisableAvatarShadows = true;
     config.DisableAvatarLights = true;
     config.UltimateTrackerRotate180 = true;
@@ -39,7 +40,7 @@ try
         reloaded.ExpressionBindings["RightSecondary"] == config.ExpressionBindings["RightSecondary"],
         "Expression enable flag, custom ID or hold/toggle mode did not round trip.");
     Check(reloaded.WaistSerial == "waist-123" &&
-          reloaded.ShowCaptureCameraGuide && reloaded.DisableAvatarShadows &&
+          reloaded.MenuBustShot && reloaded.ShowCaptureCameraGuide && reloaded.DisableAvatarShadows &&
           reloaded.DisableAvatarLights &&
           reloaded.UltimateTrackerRotate180 &&
           reloaded.AvatarVisibleInHeadset.TryGetValue("file:example.vrm", out var visible) &&
@@ -51,6 +52,7 @@ try
         "{\"CorrectionVersion\":1,\"PelvisMaxTiltDegrees\":30," +
         "\"PelvisRotationWeight\":0.7,\"WaistSerial\":\"waist-123\"}");
     var migrated = ModConfig.Load(path);
+    Check(!migrated.MenuBustShot, "Legacy settings unexpectedly enabled the menu camera.");
     Check(!migrated.ExpressionsEnabled && migrated.ExpressionBindings.Count == 0,
         "Legacy configuration unexpectedly assigned controller buttons.");
     Check(!migrated.UltimateTrackerRotate180, "Legacy settings unexpectedly enabled Ultimate rotation.");

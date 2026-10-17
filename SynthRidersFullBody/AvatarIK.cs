@@ -44,6 +44,9 @@ internal sealed class AvatarIK
                 $"initiated={_ik?.solver?.initiated}, " +
                 $"IKWeight={_ik?.solver?.IKPositionWeight:0.###}, LOD={_ik?.solver?.LOD}, " +
                 $"headTarget={(spine?.headTarget != null ? "yes" : "no")}, " +
+                $"head target offset={(head != null && spine?.headTarget != null ? (spine.headTarget.position - head.position).ToString() : "n/a")}, " +
+                $"leg length multipliers=({_ik?.solver?.leftLeg?.legLengthMlp:0.###}/{_ik?.solver?.rightLeg?.legLengthMlp:0.###}), " +
+                $"bend to target=({_ik?.solver?.leftLeg?.bendToTargetWeight:0.###}/{_ik?.solver?.rightLeg?.bendToTargetWeight:0.###}), " +
                 $"neckStiffness={_previousNeckStiffness:0.###}->{spine?.neckStiffness:0.###}, " +
                 $"headClamp={_previousHeadClampWeight:0.###}->{spine?.headClampWeight:0.###}, " +
                 $"chestGoalWeight={spine?.chestGoalWeight:0.###}, " +
@@ -168,6 +171,17 @@ internal sealed class AvatarIK
     private float _pelvisAngleAfterSolve;
     private float _leftFootErrorAfterSolve;
     private float _rightFootErrorAfterSolve;
+    private KneePoseSample _leftKneeAfterSolve, _rightKneeAfterSolve;
+    private TrackedFootPose _leftFootPose, _rightFootPose;
+    private FootPoseSample _leftFootAfterSolve, _rightFootAfterSolve;
+    private float _leftEndAngleBeforeToeCorrection, _rightEndAngleBeforeToeCorrection;
+    private Vector3 _pelvisDeltaAfterSolve;
+    private float? _headErrorAfterSolve, _headAngleAfterSolve;
+    private int _lastSolveFrame = -1, _lastTargetFrame = -1, _solvedTargetFrame = -1;
+    private float _ikWeightAfterSolve;
+    private int _lodAfterSolve;
+    private float _leftLegWeightAfterSolve, _rightLegWeightAfterSolve;
+    private float _leftGuideWeightAfterSolve, _rightGuideWeightAfterSolve;
     private Pose _rawWaist;
     private Vector3 _waistCalibrationPosition;
     private Vector3 _pelvisCalibrationPosition;
@@ -237,16 +251,10 @@ internal sealed class AvatarIK
     private Vector3 _rightTrackerReferencePosition;
     private Vector3 _leftTargetReferencePosition;
     private Vector3 _rightTargetReferencePosition;
-    private float _leftUserLegReferenceDistance;
-    private float _rightUserLegReferenceDistance;
-    private float _leftAvatarLegReferenceDistance;
-    private float _rightAvatarLegReferenceDistance;
     private Vector3 _chestLocalOffset;
     private Vector3 _bodyForwardReference;
     private Vector3 _leftKneeDirectionReference;
     private Vector3 _rightKneeDirectionReference;
-    private Vector3 _lastLeftBend;
-    private Vector3 _lastRightBend;
     private Vector3 _leftLegAxisReference;
     private Vector3 _rightLegAxisReference;
     private Quaternion _lastPelvisYaw = Quaternion.identity;
@@ -464,26 +472,50 @@ internal sealed class AvatarIK
     }
 
     /// <summary>
-    /// VRIK計算後に足先回転を反映し、骨盤誤差と計算時刻を記録します。
+    /// VRIK計算後に足先回転を反映し、同じ時点の骨盤・足誤差と膝・重みを保存します。
     /// </summary>
     private void AfterSolve()
     {
         try
         {
             if (!_calibrated || _usingGameTargets || !_hasAppliedTargets || !OwnsIkTargets()) return;
+            _leftEndAngleBeforeToeCorrection = Quaternion.Angle(LeftLegEnd.rotation, _leftTarget!.rotation);
+            _rightEndAngleBeforeToeCorrection = Quaternion.Angle(RightLegEnd.rotation, _rightTarget!.rotation);
             if (_boundSolver!.LOD < 2)
                 ApplyUnmeasuredToeRotations(_hasLeftTracking, _hasRightTracking,
                     _trackingBlend * Mathf.Clamp01(_boundSolver.IKPositionWeight));
             _additional.ApplyToeRotations(_hasLeftTracking, _hasRightTracking);
-            _solveCount++;
-            _lastSolveTime = Time.unscaledTime;
             _pelvisErrorAfterSolve = Vector3.Distance(_hips.position, _pelvisTarget!.position);
+            _pelvisDeltaAfterSolve = _hips.position - _pelvisTarget.position;
             _pelvisAngleAfterSolve = Quaternion.Angle(_hips.rotation, _pelvisTarget.rotation);
             _leftFootErrorAfterSolve = Vector3.Distance(LeftLegEnd.position, _leftTarget!.position);
             _rightFootErrorAfterSolve = Vector3.Distance(RightLegEnd.position, _rightTarget!.position);
+            var leftLeg = _boundSolver.leftLeg;
+            var rightLeg = _boundSolver.rightLeg;
+            _leftKneeAfterSolve = SampleKnee(_leftUpper, _leftLower, _leftFoot,
+                leftLeg.bendGoal, leftLeg.bendGoalWeight);
+            _rightKneeAfterSolve = SampleKnee(_rightUpper, _rightLower, _rightFoot,
+                rightLeg.bendGoal, rightLeg.bendGoalWeight);
+            _leftFootAfterSolve = SampleFoot(_leftUpper, _leftLower, _leftFoot, LeftLegEnd, _leftFootPose);
+            _rightFootAfterSolve = SampleFoot(_rightUpper, _rightLower, _rightFoot, RightLegEnd, _rightFootPose);
+            var head = Animator.GetBoneTransform(HumanBodyBones.Head);
+            var headTarget = _boundSolver.spine?.headTarget;
+            _headErrorAfterSolve = head != null && headTarget != null ? Vector3.Distance(head.position, headTarget.position) : null;
+            _headAngleAfterSolve = head != null && headTarget != null ? Quaternion.Angle(head.rotation, headTarget.rotation) : null;
+            _ikWeightAfterSolve = _boundSolver.IKPositionWeight;
+            _lodAfterSolve = _boundSolver.LOD;
+            _leftLegWeightAfterSolve = leftLeg.positionWeight;
+            _rightLegWeightAfterSolve = rightLeg.positionWeight;
+            _leftGuideWeightAfterSolve = leftLeg.bendGoalWeight;
+            _rightGuideWeightAfterSolve = rightLeg.bendGoalWeight;
+            _solvedTargetFrame = _lastTargetFrame;
+            _lastSolveFrame = Time.frameCount;
+            _lastSolveTime = Time.unscaledTime;
+            _solveCount++;
         }
         catch (Exception exception)
         {
+            _lastSolveTime = -1f;
             _solveError = $"VRIK post-solve failed: {exception.GetType().Name}: {exception.Message}";
         }
     }
@@ -560,8 +592,7 @@ internal sealed class AvatarIK
         _waistCalibrationPosition = waist.Position;
         _pelvisCalibrationPosition = _hips.position;
         _rawWaist = waist;
-        _solveCount = 0;
-        _lastSolveTime = -1f;
+        ResetSolveDiagnostics();
         _scaleAtCalibration = Animator.transform.lossyScale;
         MeasureLegLengths();
         _waistWorldOffset = _hips.position - waist.Position;
@@ -575,10 +606,6 @@ internal sealed class AvatarIK
         _rightTrackerReferencePosition = right.Position;
         _leftTargetReferencePosition = LeftLegEnd.position;
         _rightTargetReferencePosition = RightLegEnd.position;
-        _leftUserLegReferenceDistance = Vector3.Distance(waist.Position, left.Position);
-        _rightUserLegReferenceDistance = Vector3.Distance(waist.Position, right.Position);
-        _leftAvatarLegReferenceDistance = Vector3.Distance(_leftUpper.position, _leftFoot.position);
-        _rightAvatarLegReferenceDistance = Vector3.Distance(_rightUpper.position, _rightFoot.position);
         if (_chest != null)
             _chestLocalOffset = inverseHipsRotation * (_chest.position - _hips.position);
         _bodyForwardReference = Vector3.ProjectOnPlane(Animator.transform.forward, Vector3.up);
@@ -704,10 +731,10 @@ internal sealed class AvatarIK
     }
 
     /// <summary>
-    /// 腰・骨盤・頭およびソルバーの状態を比較する診断文を作成します。
+    /// MOD更新時の姿勢と、保存したVRIK計算直後の姿勢を区別して診断文を作成します。
     /// </summary>
     /// <param name="camera">ゲーム内のHMD視点として使用するカメラ。</param>
-    /// <returns>目標適用後の診断文。目標が未適用、または必要な目標が存在しない場合はnull。</returns>
+    /// <returns>診断文。目標が未適用、または必要な目標が存在しない場合はnull。MOD更新時の値は描画時の最終姿勢を意味しません。</returns>
     public string? PoseDiagnostics(Camera camera)
     {
         if (!_hasAppliedTargets || _pelvisTarget == null || _leftTarget == null ||
@@ -724,15 +751,14 @@ internal sealed class AvatarIK
             $"IK weight={_boundSolver?.IKPositionWeight:0.###}, LOD={_boundSolver?.LOD}, " +
             $"pelvis weights=({_boundSolver?.spine?.pelvisPositionWeight:0.###}/" +
             $"{_boundSolver?.spine?.pelvisRotationWeight:0.###}), " +
-            $"solves={_solveCount}, solve age={(_lastSolveTime < 0f ? -1f : Time.unscaledTime - _lastSolveTime):0.000}s, " +
-            $"post-solve pelvis error={_pelvisErrorAfterSolve:0.000}m/{_pelvisAngleAfterSolve:0.#}deg, " +
-            $"late pelvis error={pelvisError:0.000}m/{pelvisAngle:0.#}deg, " +
-            $"feet bone-target=({leftError:0.000},{rightError:0.000})m, " +
-            $"post-solve feet error=({_leftFootErrorAfterSolve:0.000}/{_rightFootErrorAfterSolve:0.000})m, " +
+            $"solves={_solveCount}, frames(log/targets)={Time.frameCount}/{_lastTargetFrame}, " +
+            PostSolveDiagnostics() + ", " +
+            $"mod-update pelvis error={pelvisError:0.000}m/{pelvisAngle:0.#}deg, " +
+            $"mod-update feet bone-target=({leftError:0.000},{rightError:0.000})m, " +
             $"toe neutral correction=({_leftToeRotation.CorrectionDegrees:0.#}/{_rightToeRotation.CorrectionDegrees:0.#})deg, " +
             $"dual toes=({_additional.DualLeft}/{_additional.DualRight}), " +
-            $"knees=(left {KneeDiagnostics(_leftUpper, _leftLower, _leftFoot, _lastLeftBend)}; " +
-            $"right {KneeDiagnostics(_rightUpper, _rightLower, _rightFoot, _lastRightBend)}), " +
+            $"knees at mod update=(left {SampleKnee(_leftUpper, _leftLower, _leftFoot, null, 0f).Summary}; " +
+            $"right {SampleKnee(_rightUpper, _rightLower, _rightFoot, null, 0f).Summary}), " +
             $"left input/target travel=({Vector3.Distance(_lastLeftPose.Position, _leftTrackerReferencePosition):0.000}/" +
             $"{Vector3.Distance(_leftTarget.position, _leftTargetReferencePosition):0.000})m, " +
             $"right input/target travel=({Vector3.Distance(_lastRightPose.Position, _rightTrackerReferencePosition):0.000}/" +
@@ -746,11 +772,11 @@ internal sealed class AvatarIK
         var hmdMotion = camera.transform.rotation * Quaternion.Inverse(_hmdReferenceRotation);
         var targetMotion = headTarget.rotation * Quaternion.Inverse(_headTargetReferenceRotation);
         var boneMotion = head.rotation * Quaternion.Inverse(_headReferenceRotation);
-        return summary + $", head motion HMD/target/bone=" +
+        return summary + $", head motion at mod update HMD/target/bone=" +
             $"({Quaternion.Angle(Quaternion.identity, hmdMotion):0.#}/" +
             $"{Quaternion.Angle(Quaternion.identity, targetMotion):0.#}/" +
             $"{Quaternion.Angle(Quaternion.identity, boneMotion):0.#})deg, " +
-            $"target-bone motion difference={Quaternion.Angle(targetMotion, boneMotion):0.#}deg";
+            $"mod-update target-bone motion difference={Quaternion.Angle(targetMotion, boneMotion):0.#}deg";
     }
 
     /// <summary>
@@ -925,26 +951,28 @@ internal sealed class AvatarIK
         // calibration offset makes the pelvis orbit the tracker on some VRMs.
         var pelvisPosition = waist.Position + pelvisYaw * _waistWorldOffset;
         var pelvisRotation = pelvisDelta * _hipsReferenceRotation;
-        var leftPosition = left.Position + left.Rotation * _leftOffset;
-        var leftRotation = left.Rotation * _leftRotationOffset;
-        var rightPosition = right.Position + right.Rotation * _rightOffset;
-        var rightRotation = right.Rotation * _rightRotationOffset;
+        // A measured foot must not be pushed away from its hip to guess a kick.
+        // That old extension reduced knee flexion and could add up to 25 cm.
+        _leftFootPose = TrackedFootPose.FromTracker(ToNumerics(left.Position), ToNumerics(left.Rotation),
+            new(ToNumerics(_leftOffset), ToNumerics(_leftRotationOffset)), _leftEndOffset,
+            hasLeft && _additional.DualLeft && _additional.TryGet(TrackerRole.LeftToes, out var leftToe)
+                ? ToNumerics(leftToe.Position) : null);
+        _rightFootPose = TrackedFootPose.FromTracker(ToNumerics(right.Position), ToNumerics(right.Rotation),
+            new(ToNumerics(_rightOffset), ToNumerics(_rightRotationOffset)), _rightEndOffset,
+            hasRight && _additional.DualRight && _additional.TryGet(TrackerRole.RightToes, out var rightToe)
+                ? ToNumerics(rightToe.Position) : null);
+        var leftPosition = FromNumerics(_leftFootPose.AnklePosition);
+        var leftRotation = FromNumerics(_leftFootPose.AnkleRotation);
+        var rightPosition = FromNumerics(_rightFootPose.AnklePosition);
+        var rightRotation = FromNumerics(_rightFootPose.AnkleRotation);
         var leftHip = pelvisPosition + pelvisRotation * _leftHipLocalOffset;
         var rightHip = pelvisPosition + pelvisRotation * _rightHipLocalOffset;
-        if (!_additional.DualLeft) leftPosition = ExtendRaisedLeg(leftPosition, leftHip, waist.Position, left.Position,
-            _leftTrackerReferencePosition, _leftUserLegReferenceDistance,
-            _leftAvatarLegReferenceDistance, _leftUpperLength + _leftLowerLength);
-        if (!_additional.DualRight) rightPosition = ExtendRaisedLeg(rightPosition, rightHip, waist.Position, right.Position,
-            _rightTrackerReferencePosition, _rightUserLegReferenceDistance,
-            _rightAvatarLegReferenceDistance, _rightUpperLength + _rightLowerLength);
         var leftBend = FromNumerics(AvatarPoseMath.LegBend(
             ToNumerics(pelvisYaw * _leftLegAxisReference),
             ToNumerics(pelvisYaw * _leftKneeDirectionReference), ToNumerics(leftPosition - leftHip)));
         var rightBend = FromNumerics(AvatarPoseMath.LegBend(
             ToNumerics(pelvisYaw * _rightLegAxisReference),
             ToNumerics(pelvisYaw * _rightKneeDirectionReference), ToNumerics(rightPosition - rightHip)));
-        _lastLeftBend = leftBend;
-        _lastRightBend = rightBend;
         if (_pelvisTarget == null) AttachIkTargets();
         if (_pelvisTarget != null && _leftTarget != null && _rightTarget != null &&
             _ik != null && _ik.enabled)
@@ -952,19 +980,8 @@ internal sealed class AvatarIK
             _hasLeftTracking = hasLeft;
             _hasRightTracking = hasRight;
             _pelvisTarget.SetPositionAndRotation(pelvisPosition, pelvisRotation);
-            // With separate ankle + toe trackers, keep the ankle position and
-            // use their calibrated bone positions for the foot's pointing axis.
-            // Bone length stays fixed; noisy measurements cannot stretch it.
-            if (hasLeft && _additional.DualLeft && _additional.TryGet(TrackerRole.LeftToes, out var leftToe))
-                leftRotation = FromNumerics(DualFootMath.Rotation(ToNumerics(leftPosition), ToNumerics(leftRotation),
-                    _leftEndOffset.Position, ToNumerics(leftToe.Position)));
-            if (hasRight && _additional.DualRight && _additional.TryGet(TrackerRole.RightToes, out var rightToe))
-                rightRotation = FromNumerics(DualFootMath.Rotation(ToNumerics(rightPosition), ToNumerics(rightRotation),
-                    _rightEndOffset.Position, ToNumerics(rightToe.Position)));
-            var leftEnd = _leftEndOffset.Apply(ToNumerics(leftPosition), ToNumerics(leftRotation));
-            var rightEnd = _rightEndOffset.Apply(ToNumerics(rightPosition), ToNumerics(rightRotation));
-            _leftTarget.SetPositionAndRotation(FromNumerics(leftEnd.Position), FromNumerics(leftEnd.Rotation));
-            _rightTarget.SetPositionAndRotation(FromNumerics(rightEnd.Position), FromNumerics(rightEnd.Rotation));
+            _leftTarget.SetPositionAndRotation(FromNumerics(_leftFootPose.EndPosition), FromNumerics(_leftFootPose.EndRotation));
+            _rightTarget.SetPositionAndRotation(FromNumerics(_rightFootPose.EndPosition), FromNumerics(_rightFootPose.EndRotation));
             if (_leftBendGoal != null || _rightBendGoal != null)
             {
                 // Use the calibrated hip sockets. Reading the solved bones here
@@ -985,6 +1002,7 @@ internal sealed class AvatarIK
             }
             UpdateVirtualChest(pelvisDelta, pelvisPosition, pelvisRotation);
             ApplyTrackedConstraints();
+            _lastTargetFrame = Time.frameCount;
             _hasAppliedTargets = true;
             return;
         }
@@ -1042,43 +1060,6 @@ internal sealed class AvatarIK
     }
 
     /// <summary>
-    /// 持ち上げた足の目標へ体格差に応じた伸展補正を加え、接地した足は移動させません。
-    /// </summary>
-    /// <param name="target">要求する足またはボーン目標の位置。基準と同じ座標系です。</param>
-    /// <param name="avatarHip">アバター側の股関節のワールド位置。</param>
-    /// <param name="userWaist">現在の腰入力のワールド位置。</param>
-    /// <param name="userFoot">現在の足入力のワールド位置。</param>
-    /// <param name="referenceFoot">校正時の足入力のワールド位置。</param>
-    /// <param name="userReferenceDistance">校正時の腰入力から足入力までの距離。単位はmです。</param>
-    /// <param name="avatarReferenceDistance">校正時のアバターの股関節から足首までの距離。単位はmです。</param>
-    /// <param name="avatarLegLength">アバターの大腿と下腿を合わせた長さ。単位はmです。</param>
-    /// <returns>補正後の足目標。補正条件を満たさない場合は元の目標。</returns>
-    private static Vector3 ExtendRaisedLeg(Vector3 target, Vector3 avatarHip,
-        Vector3 userWaist, Vector3 userFoot, Vector3 referenceFoot,
-        float userReferenceDistance, float avatarReferenceDistance, float avatarLegLength)
-    {
-        if (userReferenceDistance < 0.3f || avatarReferenceDistance < 0.3f ||
-            avatarLegLength < 0.3f) return target;
-        var rise = userFoot.y - referenceFoot.y;
-        var travel = Vector3.Distance(userFoot, referenceFoot);
-        // A planted foot must remain at its tracked world position when the
-        // pelvis sways. Add reach only when the player actually lifts a foot.
-        var amount = Mathf.InverseLerp(0.08f, 0.30f, rise) *
-                     Mathf.InverseLerp(0.12f, 0.30f, travel);
-        if (amount <= 0f) return target;
-        var leg = target - avatarHip;
-        var distance = leg.magnitude;
-        if (distance < 0.01f) return target;
-        var userExtension = Mathf.Clamp(
-            Vector3.Distance(userWaist, userFoot) / userReferenceDistance, 0.6f, 1.1f);
-        var maxReach = avatarLegLength - 0.005f;
-        var desired = Mathf.Lerp(avatarReferenceDistance * userExtension,
-            maxReach * Mathf.Min(userExtension, 1f), amount);
-        var correction = Mathf.Clamp(desired - distance, 0f, 0.25f) * amount;
-        return target + leg / distance * correction;
-    }
-
-    /// <summary>
     /// 脚の軸に対する膝の曲がる方向を求め、脚が直線なら正面方向を代用します。
     /// </summary>
     /// <param name="hip">股関節の位置。足と膝の位置と同じ座標系です。</param>
@@ -1093,18 +1074,56 @@ internal sealed class AvatarIK
             ToNumerics(hip), ToNumerics(knee), ToNumerics(foot), ToNumerics(forward)));
     }
 
-    /// <summary>膝の屈曲角と、実際の曲げ方向が要求ガイドとどの程度一致するかを記録します。</summary>
-    private static string KneeDiagnostics(Transform hip, Transform knee, Transform ankle, Vector3 expected)
+    /// <summary>その時点の骨格と実際に接続された膝ガイドから、参照を保持しない診断値を取得します。</summary>
+    /// <param name="hip">股関節ボーン。</param>
+    /// <param name="knee">膝ボーン。</param>
+    /// <param name="ankle">足首ボーン。</param>
+    /// <param name="goal">ソルバーに接続された膝ガイド。未接続時はnull。</param>
+    /// <param name="weight">ガイドの有効な重み。ゼロの場合は一致度を計測しません。</param>
+    /// <returns>計測時点の屈曲角とガイド一致度。</returns>
+    private static KneePoseSample SampleKnee(Transform hip, Transform knee, Transform ankle, Transform? goal, float weight)
     {
-        var upper = knee.position - hip.position;
-        var lower = ankle.position - knee.position;
-        var axis = ankle.position - hip.position;
-        var bend = Vector3.ProjectOnPlane(upper, axis);
-        var guide = Vector3.ProjectOnPlane(expected, axis);
-        var dot = bend.sqrMagnitude > 0.000001f && guide.sqrMagnitude > 0.000001f
-            ? Vector3.Dot(bend.normalized, guide.normalized).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
-            : "straight";
-        return $"flex={Vector3.Angle(upper, lower):0.#}deg guideDot={dot}";
+        return KneePoseSample.Capture(ToNumerics(hip.position), ToNumerics(knee.position), ToNumerics(ankle.position),
+            goal != null && weight > 0f ? ToNumerics(goal.position - hip.position) : null);
+    }
+
+    /// <summary>足首・終端の実測値と、このフレームに適用した目標を値として保存します。</summary>
+    private static FootPoseSample SampleFoot(Transform hip, Transform knee, Transform ankle, Transform end, TrackedFootPose target) =>
+        FootPoseSample.Capture(ToNumerics(hip.position), ToNumerics(knee.position), ToNumerics(ankle.position),
+            ToNumerics(ankle.rotation), ToNumerics(end.position), ToNumerics(end.rotation), target);
+
+    /// <summary>保存済みの計算結果を、取得時刻・フレーム・重みと一緒に表記します。</summary>
+    /// <returns>未計測・古い計測を区別した診断文。</returns>
+    private string PostSolveDiagnostics()
+    {
+        if (_lastSolveTime < 0f) return "post-solve sample=none";
+        var age = Time.unscaledTime - _lastSolveTime;
+        return $"post-solve sample={(age > 0.5f ? "stale" : "recent")}, solve age={age:0.000}s, " +
+            $"frames(solve/solved-targets)={_lastSolveFrame}/{_solvedTargetFrame}, " +
+            $"post-solve IK weight={_ikWeightAfterSolve:0.###}, LOD={_lodAfterSolve}, " +
+            $"post-solve leg weights=({_leftLegWeightAfterSolve:0.###}/{_rightLegWeightAfterSolve:0.###}), " +
+            $"post-solve guide weights=({_leftGuideWeightAfterSolve:0.###}/{_rightGuideWeightAfterSolve:0.###}), " +
+            $"post-solve pelvis error={_pelvisErrorAfterSolve:0.000}m/{_pelvisAngleAfterSolve:0.#}deg, " +
+            $"post-solve feet error=({_leftFootErrorAfterSolve:0.000}/{_rightFootErrorAfterSolve:0.000})m, " +
+            $"knees post-solve=(left {_leftKneeAfterSolve.Summary}; right {_rightKneeAfterSolve.Summary}), " +
+            $"post-solve pelvis delta={_pelvisDeltaAfterSolve}, " +
+            $"post-solve head error={DiagnosticNumber(_headErrorAfterSolve)}m/{DiagnosticNumber(_headAngleAfterSolve)}deg, " +
+            $"end rotation error before toe correction=({_leftEndAngleBeforeToeCorrection:0.#}/{_rightEndAngleBeforeToeCorrection:0.#})deg, " +
+            $"feet post-solve=(left {_leftFootAfterSolve.Summary}; right {_rightFootAfterSolve.Summary})";
+    }
+
+    /// <summary>未登録の頭目標を、ゼロの計測誤差と区別します。</summary>
+    private static string DiagnosticNumber(float? value) => value?.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) ?? "n/a";
+
+    /// <summary>校正や接続を切り替える際、以前のソルバー結果を未計測へ戻します。</summary>
+    private void ResetSolveDiagnostics()
+    {
+        _solveCount = 0;
+        _lastSolveTime = -1f;
+        _lastSolveFrame = _lastTargetFrame = _solvedTargetFrame = -1;
+        _leftKneeAfterSolve = _rightKneeAfterSolve = default;
+        _leftFootAfterSolve = _rightFootAfterSolve = default;
+        _headErrorAfterSolve = _headAngleAfterSolve = null;
     }
 
     /// <summary>
@@ -1290,6 +1309,7 @@ internal sealed class AvatarIK
     /// </summary>
     private void ReleaseIkTargets()
     {
+        ResetSolveDiagnostics();
         _additional.Detach();
         var restoreRootCalibration = false;
         try

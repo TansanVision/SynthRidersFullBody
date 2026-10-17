@@ -117,6 +117,19 @@ internal static class CaptureCameraResolver
             "ThirdPersonCustom" or "Spectator" or "Cinematic" or "OFF" ? mode : null;
     }
 
+    /// <summary>探索後から描画直前までに、ゲームの出力モード・出力カメラが切り替わっていないかを軽量に確認します。</summary>
+    /// <param name="camera">直近の探索で採用したカメラ。</param>
+    /// <param name="mode">探索時のカメラモード。旧版で取得不能ならnull。</param>
+    /// <returns>取得できた現在の選択情報と矛盾しない場合はtrue。対象の適格性はFindで検証します。</returns>
+    internal static bool IsStillSelected(Camera camera, string? mode)
+    {
+        if (CurrentMode() != mode || camera == null || !camera.gameObject.activeInHierarchy) return false;
+        var owner = OptionalMember.ReadStatic(typeof(MainCameraEnabler), "s_instance") as MainCameraEnabler;
+        if (owner == null) return true; // Older builds use the mode-root fallback in Find.
+        var selected = CameraOf(OptionalMember.Read(owner, "currentScreenCamera"));
+        return selected == null || selected == camera;
+    }
+
     /// <summary>表示モードに対応するゲームのカメラルート名を返します。</summary>
     private static string? ModeMember(string? mode) => mode switch
     {

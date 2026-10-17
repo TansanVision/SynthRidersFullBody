@@ -284,5 +284,15 @@
   "Restore default size / distance": "Standardgröße / -abstand",
   "Shared across avatars. Position stays fixed until you move it. Calibration keeps its front direction.": "Für alle Avatare. Die Position bleibt bis zur Bedienung fest. Die Kalibrierungsrichtung bleibt erhalten.",
   "Show details": "Details",
-  "Raw coordinates: compare only within the same API": "Rohkoordinaten: nur innerhalb derselben API vergleichen"
+  "Raw coordinates: compare only within the same API": "Rohkoordinaten: nur innerhalb derselben API vergleichen",
+  "Menu bust shot: {0}": "Brustbild im Menü: {0}",
+  "Menu bust shot: OFF": "Brustbild: AUS",
+  "Menu bust shot: waiting for Home / Song Selection": "Brustbild: nur Startseite / Songauswahl",
+  "Menu bust shot: load an avatar": "Brustbild: Avatar laden",
+  "Menu bust shot: select a third-person camera": "Brustbild: Drittpersonkamera wählen",
+  "Menu bust shot: waiting for camera render": "Brustbild: Warten auf Kamerabild",
+  "Menu bust shot: waiting for avatar pose": "Brustbild: Warten auf Avatar",
+  "Menu bust shot: fixed": "Brustbild: fixiert",
+  "Menu bust shot: unavailable (see log)": "Brustbild: nicht verfügbar (siehe Log)",
+  "Home / Song Selection only; gameplay uses the game camera.": "Nur Startseite / Songauswahl; beim Spielen gilt die Spielkamera."
 }

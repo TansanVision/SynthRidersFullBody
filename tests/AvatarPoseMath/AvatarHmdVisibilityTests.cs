@@ -15,10 +15,19 @@ internal static class AvatarHmdVisibilityTests
         var visibility = new AvatarHmdVisibility();
         var key = AvatarHmdVisibility.AvatarKey(loader)!;
         config.AvatarVisibleInHeadset[key] = false;
-        check(visibility.ApplySaved(config) && loader.specificSettings!.HideInFirtPersonView,
+        check(visibility.ApplySaved(config) && loader.specificSettings!.HideInFirtPersonView &&
+            loader.infoProvider!.HideInFirtPersonView && loader.LayerCount == 1,
             "Saved hidden preference was not applied.");
-        check(!visibility.ApplySaved(config) && loader.ToggleCount == 1,
-            "Stable avatar was toggled a second time.");
+        check(!visibility.ApplySaved(config) && loader.ToggleCount == 0,
+            "Visibility still relied on a menu toggle with an unspecified setting target.");
+
+        // The common view can change independently from per-avatar calibration/settings.
+        loader.infoProvider!.HideInFirtPersonView = false;
+        check(visibility.TryGet(out var actualVisible) && actualVisible,
+            "UI read stale per-avatar data instead of the common view setting.");
+        Time.unscaledTime += 2;
+        check(visibility.ApplySaved(config) && loader.infoProvider.HideInFirtPersonView,
+            "An independent common-view reset was not repaired.");
 
         // The game reloads per-avatar data without replacing vrmObject.
         Time.unscaledTime += 2;
@@ -66,11 +75,17 @@ internal static class AvatarHmdVisibilityTests
             "Hiding the headset avatar disabled the whole avatar or changed the capture camera.");
 
         // An API no-op must not be saved as a successful user change.
-        loader.IgnoreToggle = true;
-        check(!visibility.TryToggle(config) && !config.AvatarVisibleInHeadset[key],
-            "A failed native toggle was reported and saved as successful.");
-        loader.IgnoreToggle = false;
+        loader.infoProvider.IgnoreVisibilityWrites = true;
+        check(!visibility.TryToggle(config) && !config.AvatarVisibleInHeadset[key] &&
+            loader.specificSettings.HideInFirtPersonView && visibility.TryGet(out visible) && !visible,
+            "Rejected common-view write was saved or left per-avatar state flipped.");
+        loader.infoProvider.IgnoreVisibilityWrites = false;
         loader.ThrowOnView = true;
+        var oldMask = loader.m_HMDCamera.cullingMask;
+        check(!visibility.TryToggle(config) && !config.AvatarVisibleInHeadset[key] &&
+            loader.specificSettings.HideInFirtPersonView && loader.infoProvider.HideInFirtPersonView &&
+            loader.m_HMDCamera.cullingMask == oldMask,
+            "Partial native view failure left a failed click applied to flags or mask.");
         Time.unscaledTime += 2;
         loader.m_HMDCamera.cullingMask |= AvatarLoader.AvatarLayerBit;
         check(!visibility.ApplySaved(config), "A native view failure was reported as applied.");
@@ -82,6 +97,17 @@ internal static class AvatarHmdVisibilityTests
         check(visibility.ApplySaved(config) &&
             (loader.m_HMDCamera.cullingMask & AvatarLoader.AvatarLayerBit) == 0,
             "A temporary native view failure never recovered.");
+
+        loader.ThrowOnLayers = true;
+        check(!visibility.TryToggle(config) && !config.AvatarVisibleInHeadset[key] &&
+            loader.infoProvider.HideInFirtPersonView && loader.specificSettings.HideInFirtPersonView,
+            "Layer initialization failure was treated as a successful visibility change.");
+        loader.ThrowOnLayers = false;
+        var provider = loader.infoProvider;
+        loader.infoProvider = null;
+        check(!visibility.TryGet(out _) && !visibility.TryToggle(config),
+            "An uninitialized view provider accepted a visibility change.");
+        loader.infoProvider = provider;
 
         // A ready avatar with correct flags still needs its new camera initialized.
         var another = new AvatarLoader();
@@ -155,24 +181,33 @@ namespace Il2CppSynth.Avatars
         public GameObject? vrmObject = new("Avatar");
         public AvatarItem? activeAvatar = new() { avatarPath = "C:/Avatars/Example.vrm" };
         public AvatarSettings? specificSettings = new();
+        public Il2Cpp.Game_InfoProvider? infoProvider = new();
         public Camera? m_HMDCamera = new("HMD");
         public bool avatarIsLoading;
         public bool hasAvatarLoaded = true;
-        public bool IgnoreToggle;
         public bool ThrowOnView;
+        public bool ThrowOnLayers;
         public int ToggleCount;
+        public int LayerCount;
         public int ViewCount;
         public void ToggleAvatarsFirstPersonModel()
         {
             ToggleCount++;
-            if (!IgnoreToggle) specificSettings!.HideInFirtPersonView = !specificSettings.HideInFirtPersonView;
+            // Deliberately separate data stores: the earlier fake updated only
+            // specificSettings and could not reproduce this reported failure.
+            infoProvider!.HideInFirtPersonView = !infoProvider.HideInFirtPersonView;
+        }
+        public void SetFirstPersonCameraLayers()
+        {
+            LayerCount++;
+            if (ThrowOnLayers) throw new InvalidOperationException("Native layers unavailable");
+            if (infoProvider!.HideInFirtPersonView) m_HMDCamera!.cullingMask &= ~AvatarLayerBit;
+            else m_HMDCamera!.cullingMask |= AvatarLayerBit;
         }
         public void SetFirstPersonCameraView()
         {
             ViewCount++;
             if (ThrowOnView) throw new InvalidOperationException("Native view unavailable");
-            if (specificSettings!.HideInFirtPersonView) m_HMDCamera!.cullingMask &= ~AvatarLayerBit;
-            else m_HMDCamera!.cullingMask |= AvatarLayerBit;
         }
     }
 }

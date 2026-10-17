@@ -284,5 +284,15 @@
   "Restore default size / distance": "크기·거리 기본값 복원",
   "Shared across avatars. Position stays fixed until you move it. Calibration keeps its front direction.": "모든 아바타에 공통 적용됩니다. 조작 전까지 위치가 고정되며 캘리브레이션 정면은 바뀌지 않습니다.",
   "Show details": "상세 표시",
-  "Raw coordinates: compare only within the same API": "원시 좌표: 같은 API 내에서만 비교하세요"
+  "Raw coordinates: compare only within the same API": "원시 좌표: 같은 API 내에서만 비교하세요",
+  "Menu bust shot: {0}": "메뉴 상반신 샷: {0}",
+  "Menu bust shot: OFF": "상반신 샷: 꺼짐",
+  "Menu bust shot: waiting for Home / Song Selection": "상반신 샷: 홈 / 곡 선택에서만 사용",
+  "Menu bust shot: load an avatar": "상반신 샷: 아바타를 불러오세요",
+  "Menu bust shot: select a third-person camera": "상반신 샷: 3인칭 카메라를 선택하세요",
+  "Menu bust shot: waiting for camera render": "상반신 샷: 카메라 렌더링 대기 중",
+  "Menu bust shot: waiting for avatar pose": "상반신 샷: 아바타 준비 대기 중",
+  "Menu bust shot: fixed": "상반신 샷: 고정됨",
+  "Menu bust shot: unavailable (see log)": "상반신 샷: 사용 불가 (로그 확인)",
+  "Home / Song Selection only; gameplay uses the game camera.": "홈 / 곡 선택에서만 사용합니다. 플레이 중에는 게임 카메라로 돌아갑니다."
 }

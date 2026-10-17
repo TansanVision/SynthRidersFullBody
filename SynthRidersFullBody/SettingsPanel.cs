@@ -45,6 +45,8 @@ internal enum PanelCommand
     /// カメラガイドの表示を反転する要求。
     /// </summary>
     ToggleCameraGuide, 
+    /// <summary>ホーム・曲選択での固定バストショットを反転する要求。</summary>
+    ToggleMenuBustShot,
     /// <summary>
     /// アバターの影を無効にする設定を反転する要求。
     /// </summary>
@@ -86,6 +88,9 @@ internal sealed partial class SettingsPanel
         _cameraGuideStatus = status;
         _cameraGuideLocation = location;
     }
+    /// <summary>固定バストショットの稼働・待機状態を表示設定へ渡します。</summary>
+    public void SetMenuCameraStatus(string status) => _menuCameraStatus = status;
+    private string _menuCameraStatus = "Menu bust shot: OFF";
     private static readonly Color PanelFill = new(0.10f, 0.065f, 0.22f, 0.97f);
     private static readonly Color Cyan = new(0.06f, 0.87f, 0.94f, 0.98f);
     private static readonly Color Pink = new(0.96f, 0.03f, 0.78f, 0.98f);
@@ -542,6 +547,7 @@ internal sealed partial class SettingsPanel
                 1 => PanelCommand.ToggleAvatarShadows,
                 2 => PanelCommand.ToggleAvatarLights,
                 3 => PanelCommand.ToggleAvatarInHeadset,
+                5 => PanelCommand.ToggleMenuBustShot,
                 _ => PanelCommand.None
             };
         if (_roleScreen) return HandleAssignmentRow(row, tracking, camera);
@@ -659,7 +665,7 @@ internal sealed partial class SettingsPanel
             _controls[2] = new(PanelControlKind.Toggle, true, !lightsOff);
             _controls[3] = new(PanelControlKind.Toggle, hmdAvailable, hmdVisible);
             _controls[4] = new(PanelControlKind.Navigation);
-            _controls[5] = new(PanelControlKind.Information);
+            _controls[5] = new(PanelControlKind.Toggle, true, _uiConfig.MenuBustShot);
         }
         else if (_roleScreen) UpdateAssignmentControls(tracking);
         else if (_ultimateBefore is { } before)
@@ -1078,9 +1084,11 @@ internal sealed partial class SettingsPanel
             ? UiText.Format("VRM in headset: {0}", UiText.OnOff(avatarVisibleInHmd))
             : UiText.Get("VRM in headset: load an avatar");
         _rows[4]!.text = UiText.Get("Panel & feedback");
-        _rows[5]!.text = cameraGuideEnabled && captureCameraFound ? UiText.Status(_cameraGuideLocation) : "";
-        _footer!.text = UiText.Get("Cyan sphere marks the camera; visual options are shared") + "\n" +
-            UiText.Get("These options do not require recalibration.");
+        _rows[5]!.text = UiText.Format("Menu bust shot: {0}", UiText.OnOff(_uiConfig.MenuBustShot));
+        _footer!.text = (_uiConfig.MenuBustShot ? UiText.Status(_menuCameraStatus) :
+            UiText.Get("Home / Song Selection only; gameplay uses the game camera.")) + "\n" +
+            (cameraGuideEnabled && captureCameraFound ? UiText.Status(_cameraGuideLocation) :
+                UiText.Get("These options do not require recalibration."));
     }
 
     /// <summary>

@@ -54,7 +54,7 @@ internal sealed class CaptureCameraGuide
     }
 
     /// <summary>出力カメラを再確認し、その現在位置へHMD専用の描画を毎フレーム提出します。</summary>
-    public void Update(Camera headsetCamera, bool enabled)
+    public void Update(Camera headsetCamera, bool enabled, MenuBustCamera? menuCamera = null)
     {
         if (!enabled)
         {
@@ -79,6 +79,8 @@ internal sealed class CaptureCameraGuide
             return;
         }
         var markerPosition = _captureCamera.transform.position;
+        if (menuCamera != null && menuCamera.TryGetPosition(_captureCamera, out var fixedPosition))
+            markerPosition = fixedPosition;
         var fromHead = markerPosition - headsetCamera.transform.position;
         var local = headsetCamera.transform.InverseTransformDirection(fromHead);
         var direction = local.z < 0f ? (local.x < 0f ? "behind / left" : "behind / right") :

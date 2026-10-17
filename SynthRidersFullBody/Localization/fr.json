@@ -284,5 +284,15 @@
   "Restore default size / distance": "Taille / distance par défaut",
   "Shared across avatars. Position stays fixed until you move it. Calibration keeps its front direction.": "Réglages communs aux avatars. Position fixe jusqu’à votre action. Le calibrage garde sa direction avant.",
   "Show details": "Détails",
-  "Raw coordinates: compare only within the same API": "Coordonnées brutes : comparer dans une même API"
+  "Raw coordinates: compare only within the same API": "Coordonnées brutes : comparer dans une même API",
+  "Menu bust shot: {0}": "Plan buste dans les menus : {0}",
+  "Menu bust shot: OFF": "Plan buste : désactivé",
+  "Menu bust shot: waiting for Home / Song Selection": "Plan buste : accueil / choix de chanson uniquement",
+  "Menu bust shot: load an avatar": "Plan buste : chargez un avatar",
+  "Menu bust shot: select a third-person camera": "Plan buste : choisissez une caméra à la troisième personne",
+  "Menu bust shot: waiting for camera render": "Plan buste : en attente du rendu",
+  "Menu bust shot: waiting for avatar pose": "Plan buste : en attente de l’avatar",
+  "Menu bust shot: fixed": "Plan buste : fixe",
+  "Menu bust shot: unavailable (see log)": "Plan buste : indisponible (voir le journal)",
+  "Home / Song Selection only; gameplay uses the game camera.": "Accueil / choix de chanson uniquement ; caméra du jeu pendant les chansons."
 }

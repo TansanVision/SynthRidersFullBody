@@ -124,6 +124,13 @@ internal static class CameraResolverTests
         owner.currentScreenCamera = ambiguousRoot.GetComponentInChildren<Camera>(true);
         check(CaptureCameraResolver.Find(head, out _) == owner.currentScreenCamera,
             "Explicit current output was rejected just because its root has multiple cameras.");
+        var selected = owner.currentScreenCamera!;
+        check(CaptureCameraResolver.IsStillSelected(selected, "Spectator"), "Selected output failed the render-time guard.");
+        owner.currentScreenCamera = film;
+        check(!CaptureCameraResolver.IsStillSelected(selected, "Spectator"), "Old output passed the render-time guard after replacement.");
+        owner.currentScreenCamera = selected;
+        Il2Cpp.Game_InfoProvider.CurrentCamType = "OFF";
+        check(!CaptureCameraResolver.IsStillSelected(selected, "Spectator"), "Camera OFF did not invalidate a cached output.");
         Il2Cpp.MainCameraEnabler.s_instance = null;
         Il2Cpp.Game_InfoProvider.CurrentCamType = null;
         Resources.All.Clear();
@@ -189,7 +196,7 @@ namespace UnityEngine
         public T? GetComponentInChildren<T>(bool includeInactive) where T : Component =>
             transform.GetComponentsInChildren<T>(includeInactive).FirstOrDefault();
     }
-    public class Scene { public bool Valid = true; public bool IsValid() => Valid; }
+    public class Scene { public bool Valid = true; public int handle = 1; public bool IsValid() => Valid; }
     public class Transform : Component
     {
         public Transform? parent;
@@ -223,8 +230,15 @@ namespace Il2Cpp
 {
     public class MainCameraEnabler : UnityEngine.Component { public static MainCameraEnabler? s_instance; }
     public class CustomCameraSettings : UnityEngine.Component { }
-    public static class Game_InfoProvider
+    public class Game_InfoProvider
     {
+        private bool _hideInFirstPerson;
+        public bool IgnoreVisibilityWrites;
+        public bool HideInFirtPersonView
+        {
+            get => _hideInFirstPerson;
+            set { if (!IgnoreVisibilityWrites) _hideInFirstPerson = value; }
+        }
         public static object? CurrentCamType;
         public static string? Language;
         public static bool LanguageUnavailable;

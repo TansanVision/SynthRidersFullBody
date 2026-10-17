@@ -2,7 +2,7 @@ using MelonLoader;
 using Il2CppSynth.Avatars;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.58.1", "SynthRidersFullBody")]
+[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.59.1", "SynthRidersFullBody")]
 
 namespace SynthRidersFullBody;
 
@@ -20,6 +20,8 @@ public sealed class FullBodyMod : MelonMod
     private readonly CalibrationSampler _calibrationSampler = new();
     private readonly AvatarRendering _avatarRendering = new();
     private readonly CaptureCameraGuide _captureCameraGuide = new();
+    private readonly MenuBustCamera _menuBustCamera = new();
+    private string _lastMenuCameraDiagnostic = "";
     private readonly AvatarHmdVisibility _avatarHmdVisibility = new();
     private readonly AvatarExpressions _expressions = new();
     private ExpressionInput _expressionInput;
@@ -75,6 +77,8 @@ public sealed class FullBodyMod : MelonMod
             }
             _tracking = new Tracking(_config);
             _panel.SetUiConfiguration(_config);
+            try { _menuBustCamera.Initialize(); }
+            catch (Exception exception) { LoggerInstance.Warning($"Menu bust camera initialization failed: {exception}"); }
             TrySaveConfig();
             LoggerInstance.Msg($"Configuration: {_configPath ?? "session defaults"}");
             LoggerInstance.Msg($"Avatar correction: 1€ filter={_config.SmoothingEnabled}, " +
@@ -103,6 +107,7 @@ public sealed class FullBodyMod : MelonMod
         ResetExpressions(true);
         _avatarRendering.Restore();
         _captureCameraGuide.Dispose();
+        _menuBustCamera.Dispose();
         try { _avatar?.Dispose(); }
         catch (Exception exception)
         {
@@ -133,6 +138,7 @@ public sealed class FullBodyMod : MelonMod
         _avatarRendering.RequestRescan();
         _avatarHmdVisibility.RequestRefresh();
         _captureCameraGuide.RequestRescan();
+        _menuBustCamera.ResetFrame();
         _headCameraId = 0;
         if (_sessionCalibration != null) QueueCalibrationRecovery("scene loaded: " + sceneName, true);
         LoggerInstance.Msg($"Scene loaded: {sceneName}; VRM visual settings will be reapplied.");
@@ -160,6 +166,7 @@ public sealed class FullBodyMod : MelonMod
                 _calibrationSampler.Reset();
                 _poseFilter.Reset();
                 _captureCameraGuide.Hide();
+                _menuBustCamera.Update(null, null, false, false);
                 return;
             }
             var avatarMenuOpen = _menuButton.IsAvatarMenuOpen();
@@ -258,7 +265,15 @@ public sealed class FullBodyMod : MelonMod
             }
             try
             {
-                _captureCameraGuide.Update(camera, _config.ShowCaptureCameraGuide);
+                _menuBustCamera.Update(camera, _avatar?.Animator, _config.MenuBustShot, _panel.ShowCalibrationPose || _recoveryPending);
+                _panel.SetMenuCameraStatus(_menuBustCamera.Status);
+                var menuCameraDiagnostic = _menuBustCamera.Diagnostic;
+                if (_lastMenuCameraDiagnostic != menuCameraDiagnostic)
+                {
+                    _lastMenuCameraDiagnostic = menuCameraDiagnostic;
+                    LoggerInstance.Msg($"Menu bust camera: {menuCameraDiagnostic}");
+                }
+                _captureCameraGuide.Update(camera, _config.ShowCaptureCameraGuide, _menuBustCamera);
                 var cameraDiagnosticKey = $"{camera.GetInstanceID()}|{_captureCameraGuide.DiagnosticKey}";
                 if (_lastCaptureCameraDiagnosticKey != cameraDiagnosticKey)
                 {
@@ -282,6 +297,7 @@ public sealed class FullBodyMod : MelonMod
                     _nextVisualErrorLog = Time.unscaledTime + 30f;
                 }
                 _captureCameraGuide.Hide();
+                _menuBustCamera.Update(null, null, false, false);
             }
 
             PrepareExpressions();
@@ -481,6 +497,7 @@ public sealed class FullBodyMod : MelonMod
             if (_panel.IsOpen && Time.unscaledTime >= _nextPoseDiagnostics)
             {
                 _nextPoseDiagnostics = Time.unscaledTime + 2.5f;
+                // Current bones may be the animation input. Solved knees are sampled separately in VRIK.OnPostUpdate.
                 var diagnostics = _avatar.PoseDiagnostics(camera);
                 if (diagnostics != null)
                     LoggerInstance.Msg($"Avatar pose diagnostics: {diagnostics}.");
@@ -519,6 +536,7 @@ public sealed class FullBodyMod : MelonMod
             _calibrationEnd = 0f;
             _lastDriveMode = "";
             _captureCameraGuide.Hide();
+            _menuBustCamera.Update(null, null, false, false);
             _avatarRendering.Restore();
             try { _avatar?.Dispose(); }
             catch (Exception cleanupError)
@@ -593,6 +611,10 @@ public sealed class FullBodyMod : MelonMod
             case PanelCommand.ToggleCameraGuide:
                 _config.ShowCaptureCameraGuide = !_config.ShowCaptureCameraGuide;
                 _captureCameraGuide.RequestRescan();
+                break;
+            case PanelCommand.ToggleMenuBustShot:
+                _config.MenuBustShot = !_config.MenuBustShot;
+                _menuBustCamera.Update(camera, _avatar?.Animator, _config.MenuBustShot, _panel.ShowCalibrationPose || _recoveryPending);
                 break;
             case PanelCommand.ToggleAvatarShadows:
                 _config.DisableAvatarShadows = !_config.DisableAvatarShadows; break;

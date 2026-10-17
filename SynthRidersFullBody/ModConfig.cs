@@ -40,6 +40,8 @@ public sealed class ModConfig
     /// HMD内に配信用カメラのガイドを表示するかを指定します。
     /// </summary>
     public bool ShowCaptureCameraGuide { get; set; }
+    /// <summary>ホーム・曲選択の配信カメラを固定バストショットへ切り替えます。全アバター共通、初期値はOFFです。</summary>
+    public bool MenuBustShot { get; set; }
     /// <summary>
     /// 対象アバターの影の投射・受け取りを無効にするかを指定します。
     /// </summary>
