@@ -83,6 +83,7 @@ dotnet build .\SynthRidersFullBody.sln -c Release -p:MelonDir="C:\SynthRidersRef
 dotnet run --project .\tests\AvatarPoseMath\AvatarPoseMath.csproj -c Release
 dotnet run --project .\tests\ConfigSmoke\ConfigSmoke.csproj -c Release
 dotnet run --project .\tests\MenuBustCamera\MenuBustCamera.csproj -c Release
+dotnet run --project .\tests\HeadCalibration\HeadCalibration.csproj -c Release
 ```
 
 ビルドや上記テストの成功は、VR機器での動作確認を意味しません。実機確認は [チェックリスト](../REAL_DEVICE_CHECKLIST.md) を使用してください。

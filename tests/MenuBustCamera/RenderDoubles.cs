@@ -36,12 +36,19 @@ namespace UnityEngine
             localRotation = q;
         }
     }
-    public sealed class GameObject { public bool activeInHierarchy = true; }
+    public sealed class GameObject { public bool activeInHierarchy = true; public int layer; }
+    public sealed class Renderer
+    {
+        public GameObject gameObject = new();
+        public bool enabled = true, forceRenderingOff;
+        public Rendering.ShadowCastingMode shadowCastingMode;
+    }
     public sealed class Camera
     {
         public Transform transform = new();
         public GameObject gameObject = new();
         public bool stereoEnabled, orthographic;
+        public int cullingMask = -1;
         public float aspect = 16f / 9f, nearClipPlane = .1f, farClipPlane = 1000f, fieldOfView = 60f;
         public static CameraCallback? onPreCull, onPostRender;
         public sealed class CameraCallback
@@ -59,6 +66,8 @@ namespace UnityEngine
         public GameObject gameObject = new();
         public Transform transform = new();
         public Dictionary<HumanBodyBones, Transform> Bones = new();
+        public List<Renderer> Renderers = new() { new Renderer() };
+        public T[] GetComponentsInChildren<T>(bool includeInactive) => Renderers.Cast<T>().ToArray();
         public Transform? GetBoneTransform(HumanBodyBones bone) => Bones.GetValueOrDefault(bone);
     }
     public static class Time { public static float unscaledTime = 1f; }
@@ -77,6 +86,7 @@ namespace Il2CppSystem
 }
 namespace UnityEngine.Rendering
 {
+    public enum ShadowCastingMode { Off, On, ShadowsOnly }
     public readonly struct ScriptableRenderContext { }
     public static class RenderPipelineManager
     {
@@ -85,7 +95,7 @@ namespace UnityEngine.Rendering
 }
 namespace SynthRidersFullBody
 {
-    internal static class MenuCameraContext { public static bool Open = true; public static bool IsOpen() => Open; }
+    internal static class MenuCameraContext { public static bool Gameplay; public static bool UseGameCamera() => Gameplay; }
     internal static class CaptureCameraResolver
     {
         public static UnityEngine.Camera? Selected;

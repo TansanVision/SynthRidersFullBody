@@ -5,7 +5,10 @@ var checks = 0;
 KneeReferenceTests.Run(Check);
 KneePoseSampleTests.Run(Check);
 TrackedFootPoseTests.Run(Check);
+TrackedAnkleConstraintTests.Run(Check);
+FootPoseWindowTests.Run(Check);
 MenuBustCameraTests.Run(Check);
+CameraContextTests.Run(Check);
 // Heading must remain stable across the old projected-forward singularity at 90°.
 foreach (var heading in new[] { -170f, -90f, 0f, 45f, 170f })
 {

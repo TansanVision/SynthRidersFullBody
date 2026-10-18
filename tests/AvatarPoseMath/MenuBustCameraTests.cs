@@ -1,10 +1,10 @@
 using System.Numerics;
 using SynthRidersFullBody;
 
-/// <summary>実装した構図計算とメニュー判定を、ゲームを起動せず検証します。</summary>
+/// <summary>実装した構図計算を、ゲームを起動せず検証します。</summary>
 internal static class MenuBustCameraTests
 {
-    /// <summary>体格・向き・縦横比・近クリップ、および曲開始・シーン移動の対象制限を確認します。</summary>
+    /// <summary>体格・向き・縦横比・近クリップに対して構図を確認します。</summary>
     public static void Run(Action<bool, string> check)
     {
         foreach (var scale in new[] { .15f, 1f, 3f, 10f })
@@ -40,60 +40,5 @@ internal static class MenuBustCameraTests
         check(!MenuBustFraming.TryCreate(Vector3.UnitY * 1.6f, Vector3.UnitY * 1.2f, Vector3.UnitY,
             Vector3.UnitY, .5f, 1f, .1f, out _, out _), "Vertical avatar forward produced an arbitrary camera side.");
 
-        var manager = new Il2CppSynth.SongSelection.SongSelectionManager();
-        Il2CppSynth.SongSelection.SongSelectionManager.s_instance = manager;
-        UnityEngine.SceneManagement.SceneManager.Active.handle = 1;
-        manager.homePanel = new UnityEngine.GameObject("Home");
-        manager.songSelectionPanel = new UnityEngine.GameObject("Songs");
-        foreach (var panel in new[] { "Home", "SongSelection" })
-        {
-            manager.currentSelectedPanel = panel;
-            check(MenuCameraContext.IsOpen(), "Home/song panel was not allowed.");
-            manager.IsLoadingGameScene = true;
-            check(!MenuCameraContext.IsOpen(), "Camera remained locked during song loading.");
-            manager.IsLoadingGameScene = false;
-            manager.isOnSceneLoading = true;
-            check(!MenuCameraContext.IsOpen(), "Camera remained locked during scene loading.");
-            manager.isOnSceneLoading = false;
-            manager.onGameStartCounter = true;
-            check(!MenuCameraContext.IsOpen(), "Camera remained locked during the start countdown.");
-            manager.onGameStartCounter = false;
-        }
-        foreach (var panel in new[] { "None", "Settings", "PlayableTutorial", "MultiplayerGameStartCounter", "StageSelection" })
-        {
-            manager.currentSelectedPanel = panel;
-            check(!MenuCameraContext.IsOpen(), "An unrelated/game panel activated the bust camera.");
-        }
-        manager.currentSelectedPanel = "Home";
-        manager.homePanel.activeInHierarchy = false;
-        check(!MenuCameraContext.IsOpen(), "Hidden home panel activated the bust camera.");
-        manager.homePanel.activeInHierarchy = true;
-        UnityEngine.SceneManagement.SceneManager.Active.handle = 2;
-        check(!MenuCameraContext.IsOpen(), "Old scene's menu affected a new stage camera.");
-        UnityEngine.SceneManagement.SceneManager.Active.handle = 1;
-        manager.gameObject.activeInHierarchy = false;
-        check(!MenuCameraContext.IsOpen(), "Inactive menu manager activated the camera.");
-        Il2CppSynth.SongSelection.SongSelectionManager.s_instance = null;
-        check(!MenuCameraContext.IsOpen(), "Missing manager activated the camera.");
-    }
-}
-
-namespace UnityEngine.SceneManagement
-{
-    public static class SceneManager
-    {
-        public static UnityEngine.Scene Active = new();
-        public static UnityEngine.Scene GetActiveScene() => Active;
-    }
-}
-
-namespace Il2CppSynth.SongSelection
-{
-    public sealed class SongSelectionManager : UnityEngine.Component
-    {
-        public static SongSelectionManager? s_instance;
-        public string currentSelectedPanel = "Home";
-        public UnityEngine.GameObject? homePanel, songSelectionPanel;
-        public bool IsLoadingGameScene, isOnSceneLoading, onGameStartCounter;
     }
 }

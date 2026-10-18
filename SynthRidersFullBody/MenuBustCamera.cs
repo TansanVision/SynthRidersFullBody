@@ -3,12 +3,14 @@ using UnityEngine.Rendering;
 
 namespace SynthRidersFullBody;
 
-/// <summary>メニューで選択中の配信カメラだけを、描画の間だけ固定バストショットへ変更します。</summary>
+/// <summary>表示中のアバターを、選択中の配信カメラの描画時だけ固定バストショットにします。</summary>
 internal sealed class MenuBustCamera : IDisposable
 {
     private Camera? _headset, _capture;
     private Animator? _avatar;
-    private bool _enabled, _suspended, _framed;
+    private bool _enabled, _posePending, _framed, _refreshFrame;
+    private Renderer[] _renderers = Array.Empty<Renderer>();
+    private float _nextRendererScan;
     private Vector3 _position, _scale;
     private Quaternion _rotation;
     private float _aspect, _nearClip;
@@ -22,7 +24,7 @@ internal sealed class MenuBustCamera : IDisposable
     private Il2CppSystem.Action<ScriptableRenderContext, Camera>? _beginSrp, _endSrp;
 
     /// <summary>UI用の状態。実機でフックの動作を確認できるよう、初回描画までは待機を示します。</summary>
-    public string Status { get; private set; } = "Menu bust shot: OFF";
+    public string Status { get; private set; } = "Fixed bust shot: OFF";
     /// <summary>イベント内の例外。描画を止めず、診断へ残します。</summary>
     public string? Error { get; private set; }
     /// <summary>設定値を含めず、動作中のカメラと固定位置をログへ記録します。</summary>
@@ -50,57 +52,67 @@ internal sealed class MenuBustCamera : IDisposable
     /// <param name="headset">除外するHMDカメラ。</param>
     /// <param name="avatar">現在選択されたアバター。</param>
     /// <param name="enabled">共有設定のON/OFF。</param>
-    /// <param name="suspended">キャリブレーションの固定プレビュー中と保存済み校正の復帰中は停止します。</param>
-    public void Update(Camera? headset, Animator? avatar, bool enabled, bool suspended)
+    /// <param name="posePending">校正プレビュー・復帰中は既存構図を維持し、終了後に構図を取り直します。</param>
+    public void Update(Camera? headset, Animator? avatar, bool enabled, bool posePending)
     {
         Restore(); // Recover even if a previous render was aborted before its end callback.
-        if (_headset != headset || _avatar != avatar || _enabled != enabled || _suspended != suspended) ResetFrame();
+        if (_avatar != avatar || _enabled != enabled) ResetFrame();
+        if (_headset != headset) RequestRescan();
+        if (_posePending && !posePending) _refreshFrame = true;
         _headset = headset;
         _avatar = avatar;
         _enabled = enabled;
-        _suspended = suspended;
-        if (!enabled) { ResetFrame(); Status = "Menu bust shot: OFF"; return; }
-        if (_before == null) { Status = "Menu bust shot: unavailable (see log)"; return; }
-        if (Time.unscaledTime < _retryAt) { Status = "Menu bust shot: unavailable (see log)"; return; }
-        if (suspended)
-        { ResetFrame(); Status = "Menu bust shot: waiting for avatar pose"; return; }
-        if (!MenuCameraContext.IsOpen())
-        { ResetFrame(); Status = "Menu bust shot: waiting for Home / Song Selection"; return; }
+        _posePending = posePending;
+        if (!enabled) { ResetFrame(); Status = "Fixed bust shot: OFF"; return; }
+        if (_before == null) { Status = "Fixed bust shot: unavailable (see log)"; return; }
+        if (Time.unscaledTime < _retryAt) { Status = "Fixed bust shot: unavailable (see log)"; return; }
+        if (MenuCameraContext.UseGameCamera())
+        { _refreshFrame = true; Status = "Fixed bust shot: game camera during play"; return; }
         if (headset == null || avatar == null || !avatar.gameObject.activeInHierarchy)
-        { ResetFrame(); Status = "Menu bust shot: load an avatar"; return; }
+        { ResetFrame(); Status = "Fixed bust shot: waiting for visible avatar"; return; }
+        if (Time.unscaledTime >= _nextRendererScan)
+        {
+            _renderers = avatar.GetComponentsInChildren<Renderer>(true).ToArray();
+            _nextRendererScan = Time.unscaledTime + 1f;
+        }
         var mode = CaptureCameraResolver.CurrentMode();
         if (Time.unscaledTime >= _nextScan || _cameraMode != mode ||
             (_capture != null && !CaptureCameraResolver.IsStillSelected(_capture, _cameraMode)))
         {
             var capture = CaptureCameraResolver.Find(headset, out _);
-            if (_capture != capture) ResetFrame();
             _capture = capture;
             _cameraMode = mode;
             _nextScan = Time.unscaledTime + .25f;
         }
-        if (_capture == null) { Status = "Menu bust shot: select a third-person camera"; return; }
-        if (!_framed) Status = "Menu bust shot: waiting for camera render";
+        if (_capture == null) { Status = "Fixed bust shot: select a third-person camera"; return; }
+        if (!CanDisplayAvatar(_capture)) { Status = "Fixed bust shot: waiting for visible avatar"; return; }
+        if (posePending && !_framed) { Status = "Fixed bust shot: waiting for avatar pose"; return; }
+        if (!_framed) Status = "Fixed bust shot: waiting for camera render";
     }
 
-    /// <summary>出力カメラの描画直前に構図を適用します。HMD、鏡、LIV、プレイ中には適用しません。</summary>
+    /// <summary>プレイ外で表示可能なアバターへ構図を適用します。HMD・鏡・LIVは探索対象外です。</summary>
     private void BeforeRender(Camera camera)
     {
         try
         {
-            if (!_enabled || _suspended || Time.unscaledTime < _retryAt || _headset == null || _avatar == null || !_avatar.gameObject.activeInHierarchy ||
+            if (!_enabled || Time.unscaledTime < _retryAt || _headset == null || _avatar == null ||
                 camera == null || camera != _capture || camera == _headset || camera.stereoEnabled ||
-                camera.orthographic || !MenuCameraContext.IsOpen()) return;
+                camera.orthographic || !CanDisplayAvatar(camera) || MenuCameraContext.UseGameCamera()) return;
             // Mode changes can happen after the MOD's LateUpdate. Verify the actual selected output again.
             if (!CaptureCameraResolver.IsStillSelected(camera, _cameraMode)) return;
             if (_rendering == camera) return; // Some pipelines announce the same render through both event sets.
             Restore();
             var scale = _avatar.transform.lossyScale;
-            if (!_framed || (scale - _scale).sqrMagnitude > .000001f ||
-                Mathf.Abs(camera.aspect - _aspect) > .001f || Mathf.Abs(camera.nearClipPlane - _nearClip) > .001f)
+            if (!_posePending && (!_framed || _refreshFrame || (scale - _scale).sqrMagnitude > .000001f ||
+                Mathf.Abs(camera.aspect - _aspect) > .001f || Mathf.Abs(camera.nearClipPlane - _nearClip) > .001f))
             {
-                if (!TryFrame(camera)) { Status = "Menu bust shot: waiting for avatar pose"; return; }
-                _scale = scale; _aspect = camera.aspect; _nearClip = camera.nearClipPlane; _framed = true;
+                if (TryFrame(camera))
+                {
+                    _scale = scale; _aspect = camera.aspect; _nearClip = camera.nearClipPlane;
+                    _framed = true; _refreshFrame = false;
+                }
             }
+            if (!_framed) { Status = "Fixed bust shot: waiting for avatar pose"; return; }
             _savedLocalPosition = camera.transform.localPosition;
             _savedLocalRotation = camera.transform.localRotation;
             _savedFov = camera.fieldOfView;
@@ -108,15 +120,28 @@ internal sealed class MenuBustCamera : IDisposable
             camera.transform.SetPositionAndRotation(_position, _rotation);
             camera.fieldOfView = MenuBustFraming.FieldOfView;
             Error = null;
-            Status = "Menu bust shot: fixed";
+            Status = "Fixed bust shot: fixed";
         }
         catch (Exception exception)
         {
             Restore(); ResetFrame();
             Error = $"{exception.GetType().Name}: {exception.Message}";
             _retryAt = Time.unscaledTime + 5f;
-            Status = "Menu bust shot: unavailable (see log)";
+            Status = "Fixed bust shot: unavailable (see log)";
         }
+    }
+
+    /// <summary>配信カメラが描画可能なアバターメッシュがあるか確認します。HMDの非表示設定や前フレームの可視判定には依存しません。</summary>
+    /// <param name="camera">選択中の配信用カメラ。</param>
+    /// <returns>有効な描画部品がカメラのレイヤーマスクに含まれる場合はtrue。</returns>
+    private bool CanDisplayAvatar(Camera camera)
+    {
+        if (_avatar == null || !_avatar.gameObject.activeInHierarchy) return false;
+        foreach (var renderer in _renderers)
+            if (renderer != null && renderer.enabled && !renderer.forceRenderingOff &&
+                renderer.gameObject.activeInHierarchy && renderer.shadowCastingMode != ShadowCastingMode.ShadowsOnly &&
+                (camera.cullingMask & (1 << renderer.gameObject.layer)) != 0) return true;
+        return false;
     }
 
     /// <summary>骨格の頭・胸・肩幅から正面の固定構図を一度だけ計算します。</summary>
@@ -149,8 +174,8 @@ internal sealed class MenuBustCamera : IDisposable
     public bool TryGetPosition(Camera camera, out Vector3 position)
     {
         position = _position;
-        return _enabled && !_suspended && Time.unscaledTime >= _retryAt && _framed && camera == _capture &&
-            CaptureCameraResolver.IsStillSelected(camera, _cameraMode) && MenuCameraContext.IsOpen();
+        return _enabled && Time.unscaledTime >= _retryAt && _framed && camera != null && camera == _capture &&
+            CanDisplayAvatar(camera) && !MenuCameraContext.UseGameCamera() && CaptureCameraResolver.IsStillSelected(camera, _cameraMode);
     }
 
     /// <summary>描画中の一時変更を解除します。ゲームのカメラ制御コンポーネントは停止しません。</summary>
@@ -169,12 +194,18 @@ internal sealed class MenuBustCamera : IDisposable
         {
             Error = $"Restore failed: {exception.GetType().Name}: {exception.Message}";
             _retryAt = Time.unscaledTime + 5f;
-            Status = "Menu bust shot: unavailable (see log)";
+            Status = "Fixed bust shot: unavailable (see log)";
         }
     }
 
-    /// <summary>シーン・アバター・設定切り替え時の構図を破棄します。</summary>
-    public void ResetFrame() { Restore(); _framed = false; _capture = null; _nextScan = 0f; }
+    /// <summary>シーンのカメラを再探索します。同じアバターが見えている間は既存構図を維持します。</summary>
+    public void RequestRescan() { Restore(); _nextScan = _nextRendererScan = 0f; _refreshFrame = true; }
+
+    /// <summary>アバター交換・非表示・設定OFF時に構図と描画部品の参照を破棄します。</summary>
+    public void ResetFrame()
+    {
+        RequestRescan(); _framed = false; _capture = null; _renderers = Array.Empty<Renderer>();
+    }
 
     /// <summary>全フックを解除し、途中の描画変更を復元します。</summary>
     public void Dispose()

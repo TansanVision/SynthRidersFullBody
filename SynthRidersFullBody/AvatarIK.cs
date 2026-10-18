@@ -45,6 +45,7 @@ internal sealed class AvatarIK
                 $"IKWeight={_ik?.solver?.IKPositionWeight:0.###}, LOD={_ik?.solver?.LOD}, " +
                 $"headTarget={(spine?.headTarget != null ? "yes" : "no")}, " +
                 $"head target offset={(head != null && spine?.headTarget != null ? (spine.headTarget.position - head.position).ToString() : "n/a")}, " +
+                $"head alignment={(_additional.Has(TrackerRole.Head) ? "assigned tracker" : _calibratedHead.Calibrated ? "calibrated HMD" : "game")}, " +
                 $"leg length multipliers=({_ik?.solver?.leftLeg?.legLengthMlp:0.###}/{_ik?.solver?.rightLeg?.legLengthMlp:0.###}), " +
                 $"bend to target=({_ik?.solver?.leftLeg?.bendToTargetWeight:0.###}/{_ik?.solver?.rightLeg?.bendToTargetWeight:0.###}), " +
                 $"neckStiffness={_previousNeckStiffness:0.###}->{spine?.neckStiffness:0.###}, " +
@@ -92,12 +93,14 @@ internal sealed class AvatarIK
     /// <param name="additional">部位ごとの追跡姿勢。校正・駆動処理ではゲームのワールド空間を使用します。</param>
     /// <param name="source">取得元APIの識別名。</param>
     /// <param name="space">追跡空間からゲームのワールド空間への固定変換。</param>
+    /// <param name="camera">校正時のHMDカメラ。復帰時も使用する元の入力姿勢を保存します。</param>
     /// <returns>同じゲーム起動中の校正復帰に使用するスナップショット。</returns>
     public CalibrationSession CaptureSession(Pose waist, Pose left, Pose right,
-        IReadOnlyDictionary<TrackerRole, Pose> additional, string source, TrackingSpaceAnchor space) =>
+        IReadOnlyDictionary<TrackerRole, Pose> additional, string source, TrackingSpaceAnchor space, Camera camera) =>
         new(AvatarKey, _calibrationPose.RigSignature, _calibrationPose.CaptureBones(),
             new Pose(Animator.transform.position, Animator.transform.rotation), Animator.transform.lossyScale,
-            waist, left, right, additional.ToDictionary(x => x.Key, x => x.Value), source, space);
+            waist, left, right, additional.ToDictionary(x => x.Key, x => x.Value), source, space,
+            new Pose(camera.transform.position, camera.transform.rotation));
 
     /// <summary>
     /// アバター識別子・骨格・拡縮比が保存済み校正と互換かを確認します。
@@ -118,8 +121,9 @@ internal sealed class AvatarIK
     /// </summary>
     /// <param name="saved">最初に成功した校正から保持している復帰用データ。</param>
     /// <param name="space">追跡空間からゲームのワールド空間への固定変換。</param>
+    /// <param name="camera">復帰先で追跡中のHMD。オフセットは保存姿勢から作り、現在の首の傾きは学習しません。</param>
     /// <returns>基準姿勢を再適用して校正に成功した場合はtrue。</returns>
-    public bool RestoreSession(CalibrationSession saved, TrackingSpaceAnchor space)
+    public bool RestoreSession(CalibrationSession saved, TrackingSpaceAnchor space, Camera camera)
     {
         if (!ReadyForRecovery || !CanRestore(saved, out _)) return false;
         var additional = saved.Additional.ToDictionary(x => x.Key, x => saved.Remap(x.Value, space));
@@ -127,7 +131,8 @@ internal sealed class AvatarIK
         ResetCalibration(true);
         var success = _calibrationPose.WithReference(saved, saved.Remap(saved.Root, space), () =>
             Calibrate(saved.Remap(saved.Waist, space), saved.Remap(saved.Left, space),
-                saved.Remap(saved.Right, space), null, additional));
+                saved.Remap(saved.Right, space), camera, additional,
+                saved.Headset is { } head ? saved.Remap(head, space) : null));
         // The next current tracker frame fills the targets before a solver update.
         if (success)
         {
@@ -145,6 +150,7 @@ internal sealed class AvatarIK
     private readonly Transform _rightFoot;
     private readonly CalibratedToeRotation _leftToeRotation;
     private readonly CalibratedToeRotation _rightToeRotation;
+    private readonly CalibratedHeadTarget _calibratedHead = new();
     /// <summary>
     /// VRIKに左足先が登録されていれば足先、なければ左足首のボーンを取得します。
     /// </summary>
@@ -174,9 +180,15 @@ internal sealed class AvatarIK
     private KneePoseSample _leftKneeAfterSolve, _rightKneeAfterSolve;
     private TrackedFootPose _leftFootPose, _rightFootPose;
     private FootPoseSample _leftFootAfterSolve, _rightFootAfterSolve;
-    private float _leftEndAngleBeforeToeCorrection, _rightEndAngleBeforeToeCorrection;
+    private AnkleConstraintResult _leftAnkleConstraint, _rightAnkleConstraint;
+    private float _leftAnkleAngleBeforeConstraint, _rightAnkleAngleBeforeConstraint;
+    private readonly FootPoseWindow _leftFootWindow = new(), _rightFootWindow = new();
+    private float _leftEndAngleBeforeFootCorrections, _rightEndAngleBeforeFootCorrections;
     private Vector3 _pelvisDeltaAfterSolve;
     private float? _headErrorAfterSolve, _headAngleAfterSolve;
+    private Vector3? _headPitchAfterSolve;
+    private float _headInputTargetAngleAfterSolve, _headInputBoneAngleAfterSolve;
+    private Transform? _headset;
     private int _lastSolveFrame = -1, _lastTargetFrame = -1, _solvedTargetFrame = -1;
     private float _ikWeightAfterSolve;
     private int _lodAfterSolve;
@@ -382,6 +394,8 @@ internal sealed class AvatarIK
         _hasRightTracking = hasRight;
         if (!active)
         {
+            _leftFootWindow.Reset();
+            _rightFootWindow.Reset();
             // Do not solve from a stale pelvis pose. Return the game its own
             // targets and constraints until a valid waist sample comes back.
             if (!_usingGameTargets) RestoreIkState();
@@ -457,6 +471,7 @@ internal sealed class AvatarIK
             if (_calibrated && !_usingGameTargets && OwnsIkTargets())
             {
                 ApplyTrackedConstraints();
+                _calibratedHead.Update(true, _trackingBlend);
                 _additional.ApplyBindings();
                 // VRIK reads the animated pose. Do not feed an unmeasured toe
                 // bend (or the previous solve's bend) back into the next solve.
@@ -472,26 +487,40 @@ internal sealed class AvatarIK
     }
 
     /// <summary>
-    /// VRIK計算後に足先回転を反映し、同じ時点の骨盤・足誤差と膝・重みを保存します。
+    /// VRIK計算後に到達不足の足首と足先回転を補正し、補正後の骨盤・足・膝と重みを保存します。
     /// </summary>
     private void AfterSolve()
     {
         try
         {
             if (!_calibrated || _usingGameTargets || !_hasAppliedTargets || !OwnsIkTargets()) return;
-            _leftEndAngleBeforeToeCorrection = Quaternion.Angle(LeftLegEnd.rotation, _leftTarget!.rotation);
-            _rightEndAngleBeforeToeCorrection = Quaternion.Angle(RightLegEnd.rotation, _rightTarget!.rotation);
+            _leftEndAngleBeforeFootCorrections = Quaternion.Angle(LeftLegEnd.rotation, _leftTarget!.rotation);
+            _rightEndAngleBeforeFootCorrections = Quaternion.Angle(RightLegEnd.rotation, _rightTarget!.rotation);
+            _leftAnkleAngleBeforeConstraint = Quaternion.Angle(_leftFoot.rotation, FromNumerics(_leftFootPose.AnkleRotation));
+            _rightAnkleAngleBeforeConstraint = Quaternion.Angle(_rightFoot.rotation, FromNumerics(_rightFootPose.AnkleRotation));
+            var leftLeg = _boundSolver!.leftLeg;
+            var rightLeg = _boundSolver.rightLeg;
+            _leftAnkleConstraint = _rightAnkleConstraint = default;
             if (_boundSolver!.LOD < 2)
+            {
+                var weight = Mathf.Clamp01(_boundSolver.IKPositionWeight);
+                _leftAnkleConstraint = ApplyAnkleConstraint(_leftUpper, _leftLower, _leftFoot,
+                    _leftFootPose, LeftLegEnd != _leftFoot, leftLeg.bendGoalWeight > 0f ? leftLeg.bendGoal : null,
+                    _lastPelvisYaw * _leftKneeDirectionReference,
+                    _hasLeftTracking ? weight * Mathf.Clamp01(Mathf.Min(leftLeg.positionWeight, leftLeg.rotationWeight)) : 0f);
+                _rightAnkleConstraint = ApplyAnkleConstraint(_rightUpper, _rightLower, _rightFoot,
+                    _rightFootPose, RightLegEnd != _rightFoot, rightLeg.bendGoalWeight > 0f ? rightLeg.bendGoal : null,
+                    _lastPelvisYaw * _rightKneeDirectionReference,
+                    _hasRightTracking ? weight * Mathf.Clamp01(Mathf.Min(rightLeg.positionWeight, rightLeg.rotationWeight)) : 0f);
                 ApplyUnmeasuredToeRotations(_hasLeftTracking, _hasRightTracking,
                     _trackingBlend * Mathf.Clamp01(_boundSolver.IKPositionWeight));
+            }
             _additional.ApplyToeRotations(_hasLeftTracking, _hasRightTracking);
             _pelvisErrorAfterSolve = Vector3.Distance(_hips.position, _pelvisTarget!.position);
             _pelvisDeltaAfterSolve = _hips.position - _pelvisTarget.position;
             _pelvisAngleAfterSolve = Quaternion.Angle(_hips.rotation, _pelvisTarget.rotation);
             _leftFootErrorAfterSolve = Vector3.Distance(LeftLegEnd.position, _leftTarget!.position);
             _rightFootErrorAfterSolve = Vector3.Distance(RightLegEnd.position, _rightTarget!.position);
-            var leftLeg = _boundSolver.leftLeg;
-            var rightLeg = _boundSolver.rightLeg;
             _leftKneeAfterSolve = SampleKnee(_leftUpper, _leftLower, _leftFoot,
                 leftLeg.bendGoal, leftLeg.bendGoalWeight);
             _rightKneeAfterSolve = SampleKnee(_rightUpper, _rightLower, _rightFoot,
@@ -502,12 +531,18 @@ internal sealed class AvatarIK
             var headTarget = _boundSolver.spine?.headTarget;
             _headErrorAfterSolve = head != null && headTarget != null ? Vector3.Distance(head.position, headTarget.position) : null;
             _headAngleAfterSolve = head != null && headTarget != null ? Quaternion.Angle(head.rotation, headTarget.rotation) : null;
+            SampleHeadMotion(head, headTarget);
             _ikWeightAfterSolve = _boundSolver.IKPositionWeight;
             _lodAfterSolve = _boundSolver.LOD;
             _leftLegWeightAfterSolve = leftLeg.positionWeight;
             _rightLegWeightAfterSolve = rightLeg.positionWeight;
             _leftGuideWeightAfterSolve = leftLeg.bendGoalWeight;
             _rightGuideWeightAfterSolve = rightLeg.bendGoalWeight;
+            var usable = _boundSolver.LOD < 2 && _ikWeightAfterSolve >= .99f;
+            _leftFootWindow.Add(_leftFootAfterSolve, Time.unscaledTime, usable && _hasLeftTracking &&
+                leftLeg.positionWeight >= .99f && leftLeg.rotationWeight >= .99f);
+            _rightFootWindow.Add(_rightFootAfterSolve, Time.unscaledTime, usable && _hasRightTracking &&
+                rightLeg.positionWeight >= .99f && rightLeg.rotationWeight >= .99f);
             _solvedTargetFrame = _lastTargetFrame;
             _lastSolveFrame = Time.frameCount;
             _lastSolveTime = Time.unscaledTime;
@@ -518,6 +553,31 @@ internal sealed class AvatarIK
             _lastSolveTime = -1f;
             _solveError = $"VRIK post-solve failed: {exception.GetType().Name}: {exception.Message}";
         }
+    }
+
+    /// <summary>足先終端で到達不足になった脚を、足首の計測回転を保つ解へ補正します。</summary>
+    /// <param name="upper">大腿ボーン。</param>
+    /// <param name="lower">下腿ボーン。</param>
+    /// <param name="ankle">足首ボーン。</param>
+    /// <param name="target">このVRIK計算に使用した足の目標。</param>
+    /// <param name="hasToes">ソルバーの終端が足首より先にあるか。</param>
+    /// <param name="guide">使用中の膝ガイド。</param>
+    /// <param name="fallbackBend">ガイドがない場合の校正済み膝方向。</param>
+    /// <param name="weight">追跡とソルバーを合わせた重み。</param>
+    /// <returns>補正率・到達不足量。補正しなかった場合は既定値。</returns>
+    private AnkleConstraintResult ApplyAnkleConstraint(Transform upper, Transform lower, Transform ankle,
+        TrackedFootPose target, bool hasToes, Transform? guide, Vector3 fallbackBend, float weight)
+    {
+        if (weight <= 0f || !hasToes) return default;
+        var bend = guide != null ? guide.position - upper.position : fallbackBend;
+        if (!TrackedAnkleConstraint.TrySolve(ToNumerics(upper.position), ToNumerics(lower.position), ToNumerics(ankle.position),
+                ToNumerics(upper.rotation), ToNumerics(lower.rotation), ToNumerics(ankle.rotation), target,
+                ToNumerics(bend), hasToes, weight, _config.KneeMaxFlexionDegrees, out var correction)) return default;
+        // Only rotations change. Local bone positions, scales, pelvis and head stay intact.
+        upper.rotation = FromNumerics(correction.Upper);
+        lower.rotation = FromNumerics(correction.Lower);
+        ankle.rotation = FromNumerics(correction.Ankle);
+        return correction;
     }
 
     /// <summary>
@@ -558,7 +618,7 @@ internal sealed class AvatarIK
             _pelvisTarget == null || _leftTarget == null || _rightTarget == null)
             return false;
         var solver = _boundSolver;
-        return _additional.OwnsBindings && solver.spine != null && solver.leftLeg != null && solver.rightLeg != null &&
+        return _calibratedHead.OwnsBinding && _additional.OwnsBindings && solver.spine != null && solver.leftLeg != null && solver.rightLeg != null &&
             solver.spine.pelvisTarget == (_usingGameTargets ? _previousPelvisTarget : _pelvisTarget) &&
             solver.leftLeg.target == (_usingGameTargets ? _previousLeftTarget : _leftTarget) &&
             solver.rightLeg.target == (_usingGameTargets ? _previousRightTarget : _rightTarget) &&
@@ -581,12 +641,13 @@ internal sealed class AvatarIK
     /// <param name="waist">腰のワールド姿勢。</param>
     /// <param name="left">左足のワールド姿勢。</param>
     /// <param name="right">右足のワールド姿勢。</param>
-    /// <param name="camera">手動校正時のHMDカメラ。保存校正からの復帰ではnull。</param>
+    /// <param name="camera">現在のHMDカメラ。保存校正からの復帰でも追跡入力として使用します。</param>
     /// <param name="additional">部位ごとの追跡姿勢。校正・駆動処理ではゲームのワールド空間を使用します。</param>
+    /// <param name="savedHeadset">復帰時は元の校正のHMD姿勢を指定します。現在の首の傾きで取り直しません。</param>
     /// <returns>必要な目標を接続し、追跡を開始できる場合はtrue。</returns>
     /// <remarks>手動校正では固定プレビューと静止区間の平均入力を使用します。シーン復帰では保存した基準姿勢を一時適用してから呼び出します。</remarks>
     public bool Calibrate(Pose waist, Pose left, Pose right, Camera? camera = null,
-        IReadOnlyDictionary<TrackerRole, Pose>? additional = null)
+        IReadOnlyDictionary<TrackerRole, Pose>? additional = null, Pose? savedHeadset = null)
     {
         _additional.Calibrate(additional ?? new Dictionary<TrackerRole, Pose>());
         _waistCalibrationPosition = waist.Position;
@@ -636,12 +697,19 @@ internal sealed class AvatarIK
         _rightToeRotation.Capture();
         var head = Animator.GetBoneTransform(HumanBodyBones.Head);
         var headTarget = _ik?.solver?.spine?.headTarget;
-        _hasHeadReference = head != null && headTarget != null && camera != null;
+        // The size preview aligns eyes to the HMD; VRIK requires the head JOINT.
+        // The log showed a ~9 cm head mismatch and an upward pelvis error.
+        _headset = camera != null ? camera.transform : null;
+        var referenceHeadset = savedHeadset ?? (camera != null
+            ? new Pose(camera.transform.position, camera.transform.rotation) : (Pose?)null);
+        _calibratedHead.Capture(additional?.ContainsKey(TrackerRole.Head) == true ? null : referenceHeadset,
+            head != null ? new Pose(head.position, head.rotation) : default);
+        _hasHeadReference = head != null && headTarget != null && referenceHeadset is { IsFinite: true };
         if (_hasHeadReference)
         {
             _headReferenceRotation = head!.rotation;
             _headTargetReferenceRotation = headTarget!.rotation;
-            _hmdReferenceRotation = camera!.transform.rotation;
+            _hmdReferenceRotation = referenceHeadset!.Value.Rotation;
         }
         _hasAppliedTargets = false;
         _calibrated = true;
@@ -651,6 +719,9 @@ internal sealed class AvatarIK
         return _calibrationPose.Commit(() =>
         {
             AttachIkTargets();
+            var calibratedHead = _ik?.solver?.spine?.headTarget;
+            if (_hasHeadReference && calibratedHead != null)
+                _headTargetReferenceRotation = calibratedHead.rotation;
             var needsVrik = additional?.Keys.Any(r => r is not (TrackerRole.Waist or TrackerRole.LeftFoot or TrackerRole.RightFoot)) == true;
             if (_ikUnavailable || ((_ik != null && _ik.enabled || needsVrik) && _pelvisTarget == null))
             {
@@ -778,6 +849,31 @@ internal sealed class AvatarIK
             $"{Quaternion.Angle(Quaternion.identity, boneMotion):0.#})deg, " +
             $"mod-update target-bone motion difference={Quaternion.Angle(targetMotion, boneMotion):0.#}deg";
     }
+
+    /// <summary>IK直後の頭をHMDと同じ基準軸へ戻し、下向き固定と目標追従の違いを記録します。</summary>
+    /// <param name="head">計算後の頭ボーン。</param>
+    /// <param name="target">計算に使用した頭目標。</param>
+    private void SampleHeadMotion(Transform? head, Transform? target)
+    {
+        _headPitchAfterSolve = null;
+        if (!_hasHeadReference || _headset == null || head == null || target == null) return;
+        var hmd = _headset.rotation;
+        var targetInput = target.rotation * Quaternion.Inverse(_headTargetReferenceRotation) * _hmdReferenceRotation;
+        var boneInput = head.rotation * Quaternion.Inverse(_headReferenceRotation) * _hmdReferenceRotation;
+        _headPitchAfterSolve = new Vector3(HeadPitch(hmd), HeadPitch(targetInput), HeadPitch(boneInput));
+        _headInputTargetAngleAfterSolve = Quaternion.Angle(hmd, targetInput);
+        _headInputBoneAngleAfterSolve = Quaternion.Angle(hmd, boneInput);
+    }
+
+    /// <summary>保存済みの数値だけをログ出力時に整形し、IKの毎フレームには文字列を生成しません。</summary>
+    private string HeadMotionSummary => _headPitchAfterSolve is { } pitch
+        ? $"HMD/target/bone pitch=({pitch.x:0.#}/{pitch.y:0.#}/{pitch.z:0.#})deg, " +
+            $"HMD-target/bone rotation difference=({_headInputTargetAngleAfterSolve:0.#}/{_headInputBoneAngleAfterSolve:0.#})deg"
+        : "n/a";
+
+    /// <summary>HMDの軸で表した回転から、下向きを正とする仰俯角を求めます。</summary>
+    private static float HeadPitch(Quaternion rotation) =>
+        -Mathf.Asin(Mathf.Clamp((rotation * Vector3.forward).y, -1f, 1f)) * Mathf.Rad2Deg;
 
     /// <summary>
     /// フィルター前の腰姿勢を、追跡入力と骨盤の比較診断用に記録します。
@@ -942,6 +1038,7 @@ internal sealed class AvatarIK
         if (hasLeft) _lastLeftPose = left; else left = _lastLeftPose;
         if (hasRight) _lastRightPose = right; else right = _lastRightPose;
         _additional.Update(additional);
+        _calibratedHead.Update(!_usingGameTargets, _trackingBlend);
         if (!_additional.HeadTrackingAvailable && _rootController != null) _rootController.enabled = false;
         _leftKneeTracked = _additional.TryGet(TrackerRole.LeftKnee, out var leftKnee);
         _rightKneeTracked = _additional.TryGet(TrackerRole.RightKnee, out var rightKnee);
@@ -1108,12 +1205,26 @@ internal sealed class AvatarIK
             $"knees post-solve=(left {_leftKneeAfterSolve.Summary}; right {_rightKneeAfterSolve.Summary}), " +
             $"post-solve pelvis delta={_pelvisDeltaAfterSolve}, " +
             $"post-solve head error={DiagnosticNumber(_headErrorAfterSolve)}m/{DiagnosticNumber(_headAngleAfterSolve)}deg, " +
-            $"end rotation error before toe correction=({_leftEndAngleBeforeToeCorrection:0.#}/{_rightEndAngleBeforeToeCorrection:0.#})deg, " +
-            $"feet post-solve=(left {_leftFootAfterSolve.Summary}; right {_rightFootAfterSolve.Summary})";
+            $"post-solve head motion=({HeadMotionSummary}), " +
+            $"end rotation error before foot corrections=({_leftEndAngleBeforeFootCorrections:0.#}/{_rightEndAngleBeforeFootCorrections:0.#})deg, " +
+            $"ankle reach correction weights=({_leftAnkleConstraint.Weight:0.###}/{_rightAnkleConstraint.Weight:0.###}), " +
+            $"ankle reach excess=({_leftAnkleConstraint.Excess:0.000}/{_rightAnkleConstraint.Excess:0.000})m, " +
+            $"ankle angle before correction=({_leftAnkleAngleBeforeConstraint:0.#}/{_rightAnkleAngleBeforeConstraint:0.#})deg, " +
+            $"foot sample stage=after ankle/toe corrections, feet post-solve=(left {_leftFootAfterSolve.Summary}; right {_rightFootAfterSolve.Summary})";
     }
 
     /// <summary>未登録の頭目標を、ゼロの計測誤差と区別します。</summary>
     private static string DiagnosticNumber(float? value) => value?.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) ?? "n/a";
+
+    /// <summary>前回ログからの足の変動範囲を取得し、次の区間へ切り替えます。</summary>
+    /// <returns>計算直後の足の集計。単独フレームの診断と合わせて使用します。</returns>
+    public string TakeFootPoseWindow()
+    {
+        var result = $"left [{_leftFootWindow.Summary}]; right [{_rightFootWindow.Summary}]";
+        _leftFootWindow.Reset();
+        _rightFootWindow.Reset();
+        return result;
+    }
 
     /// <summary>校正や接続を切り替える際、以前のソルバー結果を未計測へ戻します。</summary>
     private void ResetSolveDiagnostics()
@@ -1123,7 +1234,12 @@ internal sealed class AvatarIK
         _lastSolveFrame = _lastTargetFrame = _solvedTargetFrame = -1;
         _leftKneeAfterSolve = _rightKneeAfterSolve = default;
         _leftFootAfterSolve = _rightFootAfterSolve = default;
+        _leftAnkleConstraint = _rightAnkleConstraint = default;
+        _leftAnkleAngleBeforeConstraint = _rightAnkleAngleBeforeConstraint = 0f;
+        _leftFootWindow.Reset();
+        _rightFootWindow.Reset();
         _headErrorAfterSolve = _headAngleAfterSolve = null;
+        _headPitchAfterSolve = null;
     }
 
     /// <summary>
@@ -1235,6 +1351,9 @@ internal sealed class AvatarIK
             solver.spine.headClampWeight = Mathf.Min(_previousHeadClampWeight, 0.4f);
             solver.spine.maintainPelvisPosition = 0f;
             solver.spine.minHeadHeight = 0f;
+            var head = Animator.GetBoneTransform(HumanBodyBones.Head);
+            if (head != null && !_additional.Has(TrackerRole.Head))
+                _calibratedHead.Attach(head, _headset, () => solver.spine.headTarget, t => solver.spine.headTarget = t);
             _additional.Attach(solver);
             AttachRootController();
             ApplyTrackedConstraints();
@@ -1324,6 +1443,7 @@ internal sealed class AvatarIK
         }
         finally
         {
+            try { _calibratedHead.Detach(); } catch { /* Continue releasing the other targets during teardown. */ }
             DestroyTarget(_pelvisTarget);
             DestroyTarget(_leftTarget);
             DestroyTarget(_rightTarget);
@@ -1372,6 +1492,7 @@ internal sealed class AvatarIK
     /// </summary>
     private void RestoreIkState()
     {
+        _calibratedHead.Restore();
         if (!_hasIkSnapshot || _boundSolver == null) return;
         // Restore the solver we actually modified, even if the game has
         // since replaced VRIK.solver with another instance.

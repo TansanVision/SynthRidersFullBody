@@ -2,7 +2,7 @@ using MelonLoader;
 using Il2CppSynth.Avatars;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.59.1", "SynthRidersFullBody")]
+[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.59.5", "SynthRidersFullBody")]
 
 namespace SynthRidersFullBody;
 
@@ -43,6 +43,8 @@ public sealed class FullBodyMod : MelonMod
     private bool _hasPoseResult;
     private bool _lastPoseReady;
     private float _nextPoseDiagnostics;
+    private float _nextAutomaticPoseDiagnostics;
+    private float _nextPoseDiagnosticsError;
     private float _retryTrackingAt;
     private float _nextTrackingErrorLog;
     private string _lastTrackingError = "";
@@ -138,7 +140,7 @@ public sealed class FullBodyMod : MelonMod
         _avatarRendering.RequestRescan();
         _avatarHmdVisibility.RequestRefresh();
         _captureCameraGuide.RequestRescan();
-        _menuBustCamera.ResetFrame();
+        _menuBustCamera.RequestRescan();
         _headCameraId = 0;
         if (_sessionCalibration != null) QueueCalibrationRecovery("scene loaded: " + sceneName, true);
         LoggerInstance.Msg($"Scene loaded: {sceneName}; VRM visual settings will be reapplied.");
@@ -433,7 +435,7 @@ public sealed class FullBodyMod : MelonMod
                     if (stable && _avatar != null && !_avatar.CalibrationSizeReady)
                         roleError ??= _avatar.CalibrationSizeStatus;
                     var saved = stable && _avatar != null && _tracking.TryGetCalibrationSpace(out var source, out var space)
-                        ? _avatar.CaptureSession(stableWaist, stableLeft, stableRight, stableAdditional, source, space) : null;
+                        ? _avatar.CaptureSession(stableWaist, stableLeft, stableRight, stableAdditional, source, space, camera) : null;
                     if (tPose.Warning != null)
                         LoggerInstance.Warning($"Calibration posture warning (non-blocking): {tPose.Warning}.");
                     if (hasPoses && stable && tPose.Ready && roleError == null &&
@@ -442,7 +444,7 @@ public sealed class FullBodyMod : MelonMod
                         _avatar.Calibrate(stableWaist, stableLeft, stableRight, camera, stableAdditional))
                     {
                         _avatar.HideTPosePreview();
-                        _nextPoseDiagnostics = Time.unscaledTime + 2f;
+                        _nextPoseDiagnostics = _nextAutomaticPoseDiagnostics = Time.unscaledTime + 2f;
                         _poseFilter.Reset();
                         _config.Enabled = true;
                         _calibrationRequired = false;
@@ -494,14 +496,7 @@ public sealed class FullBodyMod : MelonMod
                 LoggerInstance.Msg($"Avatar drive mode: {_lastDriveMode}.");
             }
             if (!driveAvatar || _avatar == null) return;
-            if (_panel.IsOpen && Time.unscaledTime >= _nextPoseDiagnostics)
-            {
-                _nextPoseDiagnostics = Time.unscaledTime + 2.5f;
-                // Current bones may be the animation input. Solved knees are sampled separately in VRIK.OnPostUpdate.
-                var diagnostics = _avatar.PoseDiagnostics(camera);
-                if (diagnostics != null)
-                    LoggerInstance.Msg($"Avatar pose diagnostics: {diagnostics}.");
-            }
+            LogPoseDiagnostics(camera);
             if (frame.HasWaist)
             {
                 if (_config.SmoothingEnabled)
@@ -714,6 +709,31 @@ public sealed class FullBodyMod : MelonMod
         }
     }
 
+    /// <summary>UIを閉じた曲選択・プレイ中も姿勢を定期記録し、計測失敗で追跡を停止させません。</summary>
+    /// <param name="camera">現在のHMDカメラ。描画姿勢とMOD更新時の姿勢はログで区別します。</param>
+    private void LogPoseDiagnostics(Camera camera)
+    {
+        var now = Time.unscaledTime;
+        var panelDue = _panel.IsOpen && now >= _nextPoseDiagnostics;
+        if (_avatar == null || (!panelDue && now < _nextAutomaticPoseDiagnostics)) return;
+        _nextPoseDiagnostics = now + 2.5f;
+        _nextAutomaticPoseDiagnostics = now + 10f;
+        try
+        {
+            // The current animation pose is separate from the captured post-solve pose.
+            var diagnostics = _avatar.PoseDiagnostics(camera);
+            if (diagnostics == null) return;
+            LoggerInstance.Msg($"Avatar pose diagnostics: capture={(panelDue ? "panel" : "automatic")}; {diagnostics}.");
+            LoggerInstance.Msg($"Foot pose window: {_avatar.TakeFootPoseWindow()}.");
+        }
+        catch (Exception exception)
+        {
+            if (now < _nextPoseDiagnosticsError) return;
+            _nextPoseDiagnosticsError = now + 30f;
+            LoggerInstance.Warning($"Pose diagnostics unavailable; tracking continues: {exception.Message}");
+        }
+    }
+
     /// <summary>
     /// 保存した校正と追跡原点を破棄し、明示的な再校正が必要な状態へ戻します。
     /// </summary>
@@ -780,7 +800,7 @@ public sealed class FullBodyMod : MelonMod
         if (!_tracking.TryGetSpace(_sessionCalibration.SpaceSource, out var space) ||
             !_tracking.ReadWorldPoses(camera).HasWaist) return;
         _nextRecoveryAttempt = Time.unscaledTime + 2f;
-        if (!_avatar.RestoreSession(_sessionCalibration, space))
+        if (!_avatar.RestoreSession(_sessionCalibration, space, camera))
         {
             LoggerInstance.Warning($"Full body recovery waiting: {_avatar.IkError ?? "rig not ready"}.");
             return;
@@ -788,7 +808,7 @@ public sealed class FullBodyMod : MelonMod
         _recoveryPending = _rebaseOnRecovery = false;
         _calibrationRequired = false;
         _poseFilter.Reset();
-        _nextPoseDiagnostics = Time.unscaledTime + 2f;
+        _nextPoseDiagnostics = _nextAutomaticPoseDiagnostics = Time.unscaledTime + 2f;
         LoggerInstance.Msg($"Full body calibration restored: original scale={_sessionCalibration.Scale}, " +
             $"current scale={_avatar.Animator.transform.lossyScale}; original pose and tracker offsets reused.");
     }
@@ -826,7 +846,7 @@ public sealed class FullBodyMod : MelonMod
     }
 
     /// <summary>
-    /// AvatarLoaderのHMD、稼働中のステレオカメラ、メインカメラの順で視点を探します。
+    /// AvatarLoaderのHMD、稼働中のステレオカメラの順で視点を探します。未検出時に配信カメラをHMDとして使いません。
     /// </summary>
     /// <returns>利用できるカメラ。見つからない場合はnull。</returns>
     private static Camera? FindHeadCamera()
@@ -838,6 +858,6 @@ public sealed class FullBodyMod : MelonMod
         foreach (var camera in Camera.allCameras)
             if (camera != null && camera.stereoEnabled && camera.gameObject.activeInHierarchy)
                 return camera;
-        return Camera.main;
+        return null;
     }
 }

@@ -142,7 +142,7 @@ $sourceFiles = @(
     'SynthRidersFullBody/OpenVrLicense.txt'
 )
 # Only direct source files are selected; recursive copying could include Libs/obj.
-foreach ($relativeDirectory in @('SynthRidersFullBody', 'tests/AvatarPoseMath', 'tests/ConfigSmoke', 'tests/MenuBustCamera')) {
+foreach ($relativeDirectory in @('SynthRidersFullBody', 'tests/AvatarPoseMath', 'tests/ConfigSmoke', 'tests/MenuBustCamera', 'tests/HeadCalibration')) {
     $sourceFiles += @(Get-ChildItem -LiteralPath (Join-Path $publicationRoot $relativeDirectory) -File |
         Where-Object { $_.Extension -in @('.cs', '.csproj') } |
         ForEach-Object { "$relativeDirectory/$($_.Name)" })

@@ -19,7 +19,9 @@
     <Compile Include="../../SynthRidersFullBody/AvatarPoseMath.cs" Link="AvatarPoseMath.cs" />
     <Compile Include="../../SynthRidersFullBody/KneePoseSample.cs" Link="KneePoseSample.cs" />
     <Compile Include="../../SynthRidersFullBody/TrackedFootPose.cs" Link="TrackedFootPose.cs" />
+    <Compile Include="../../SynthRidersFullBody/TrackedAnkleConstraint.cs" Link="TrackedAnkleConstraint.cs" />
     <Compile Include="../../SynthRidersFullBody/FootPoseSample.cs" Link="FootPoseSample.cs" />
+    <Compile Include="../../SynthRidersFullBody/FootPoseWindow.cs" Link="FootPoseWindow.cs" />
     <Compile Include="../../SynthRidersFullBody/MenuBustFraming.cs" Link="MenuBustFraming.cs" />
     <Compile Include="../../SynthRidersFullBody/MenuCameraContext.cs" Link="MenuCameraContext.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibrationPoseCheck.cs" Link="CalibrationPoseCheck.cs" />
