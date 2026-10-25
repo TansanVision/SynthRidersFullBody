@@ -153,6 +153,34 @@ Camera.onPreCull?.Invoke(output);
 Check(otherListenerCalls == before + 1, "Disposal removed another listener.");
 CheckRestored();
 Camera.onPreCull -= listener;
+// The production registration order must restore HMD suppression before
+// MenuBustCamera checks whether the capture can display the avatar.
+using var guard = new AvatarHeadsetRenderGuard();
+guard.Initialize();
+using var bustWithGuard = new MenuBustCamera();
+bustWithGuard.Initialize();
+avatar.gameObject.Renderers = avatar.Renderers;
+foreach (var renderer in avatar.Renderers) renderer.transform.parent = avatar.gameObject.transform;
+guard.Update(avatar.gameObject, headCamera, true);
+bustWithGuard.Update(headCamera, avatar, true, false);
+Camera.onPreCull?.Invoke(headCamera);
+Check(avatar.Renderers[0].forceRenderingOff, "Integration: HMD avatar was not hidden.");
+Camera.onPreCull?.Invoke(output);
+Check(!avatar.Renderers[0].forceRenderingOff && output.fieldOfView == 35f,
+    "Integration: HMD suppression cancelled the nested capture's bust framing.");
+Camera.onPostRender?.Invoke(output);
+Check(avatar.Renderers[0].forceRenderingOff && output.fieldOfView == 70f,
+    "Integration: nested capture did not restore the camera and resume HMD hiding.");
+Camera.onPostRender?.Invoke(headCamera);
+Check(!avatar.Renderers[0].forceRenderingOff, "Integration: avatar stayed hidden after HMD render.");
+MenuCameraContext.Gameplay = true;
+bustWithGuard.Update(headCamera, avatar, true, false);
+Camera.onPreCull?.Invoke(headCamera);
+Camera.onPreCull?.Invoke(output);
+Check(!avatar.Renderers[0].forceRenderingOff && output.fieldOfView == 70f,
+    "Integration: gameplay lost its native camera or visible capture avatar.");
+Camera.onPostRender?.Invoke(output);
+Camera.onPostRender?.Invoke(headCamera);
 Console.WriteLine($"Menu camera render/restore tests passed ({checks} checks).");
 
 void Check(bool condition, string message) { checks++; if (!condition) throw new Exception(message); }

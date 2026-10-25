@@ -34,6 +34,10 @@ namespace UnityEngine
         internal System.Numerics.Vector3 N => new(x, y, z);
         internal static Vector3 U(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);
         public static Vector3 Lerp(Vector3 a, Vector3 b, float t) => U(System.Numerics.Vector3.Lerp(a.N, b.N, t));
+        public float sqrMagnitude => N.LengthSquared();
+        public Vector3 normalized => U(System.Numerics.Vector3.Normalize(N));
+        public static Vector3 operator +(Vector3 a, Vector3 b) => U(a.N + b.N);
+        public static Vector3 operator -(Vector3 a, Vector3 b) => U(a.N - b.N);
     }
     public readonly record struct Quaternion(float x, float y, float z, float w)
     {
@@ -41,8 +45,17 @@ namespace UnityEngine
         internal static Quaternion U(System.Numerics.Quaternion q) => new(q.X, q.Y, q.Z, q.W);
         public static Quaternion identity => new(0, 0, 0, 1);
         public static Quaternion Slerp(Quaternion a, Quaternion b, float t) => U(System.Numerics.Quaternion.Slerp(a.N, b.N, t));
+        public static Quaternion AngleAxis(float degrees, Vector3 axis) => U(System.Numerics.Quaternion.CreateFromAxisAngle(axis.normalized.N, degrees * MathF.PI / 180));
+        public static Quaternion Inverse(Quaternion q) => U(System.Numerics.Quaternion.Inverse(q.N));
+        public static Quaternion operator *(Quaternion a, Quaternion b) => U(a.N * b.N);
+        public static Vector3 operator *(Quaternion a, Vector3 b) => Vector3.U(System.Numerics.Vector3.Transform(b.N, a.N));
     }
-    public static class Mathf { public static float Clamp01(float value) => Math.Clamp(value, 0, 1); }
+    public sealed class Camera { public Transform transform = new GameObject("HMD").transform; }
+    public static class Mathf
+    {
+        public static float Clamp01(float value) => Math.Clamp(value, 0, 1);
+        public static float Abs(float value) => Math.Abs(value);
+    }
 }
 namespace SynthRidersFullBody
 {
@@ -53,5 +66,16 @@ namespace SynthRidersFullBody
             Rotation.N.LengthSquared() is > .25f and < 4f;
     }
     internal enum TrackerRole { Head }
-    internal readonly record struct TrackingSpaceAnchor(UnityEngine.Vector3 Translation, UnityEngine.Quaternion Rotation);
+}
+namespace Il2CppRootMotion.FinalIK
+{
+    internal sealed class IKSolverVR
+    {
+        public Arm leftArm = new(), rightArm = new();
+        internal sealed class Arm
+        {
+            public UnityEngine.Transform? target;
+            public UnityEngine.Vector3 wristToPalmAxis = new(0, 0, 1);
+        }
+    }
 }

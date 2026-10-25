@@ -151,6 +151,7 @@ internal sealed class AvatarIK
     private readonly CalibratedToeRotation _leftToeRotation;
     private readonly CalibratedToeRotation _rightToeRotation;
     private readonly CalibratedHeadTarget _calibratedHead = new();
+    private readonly HandTargetAdjustment _handAdjustment = new();
     /// <summary>
     /// VRIKに左足先が登録されていれば足先、なければ左足首のボーンを取得します。
     /// </summary>
@@ -467,12 +468,14 @@ internal sealed class AvatarIK
     {
         try
         {
+            _handAdjustment.Restore();
             // The game may update VRIK settings after MelonLoader.LateUpdate.
             if (_calibrated && !_usingGameTargets && OwnsIkTargets())
             {
                 ApplyTrackedConstraints();
                 _calibratedHead.Update(true, _trackingBlend);
                 _additional.ApplyBindings();
+                _handAdjustment.Apply(_boundSolver!, _config.LeftHandRollDegrees, _config.RightHandRollDegrees);
                 // VRIK reads the animated pose. Do not feed an unmeasured toe
                 // bend (or the previous solve's bend) back into the next solve.
                 if (_hasAppliedTargets && _boundSolver!.LOD < 2)
@@ -482,6 +485,7 @@ internal sealed class AvatarIK
         }
         catch (Exception exception)
         {
+            _handAdjustment.Restore();
             _solveError = $"VRIK pre-solve failed: {exception.GetType().Name}: {exception.Message}";
         }
     }
@@ -493,6 +497,7 @@ internal sealed class AvatarIK
     {
         try
         {
+            _handAdjustment.Restore();
             if (!_calibrated || _usingGameTargets || !_hasAppliedTargets || !OwnsIkTargets()) return;
             _leftEndAngleBeforeFootCorrections = Quaternion.Angle(LeftLegEnd.rotation, _leftTarget!.rotation);
             _rightEndAngleBeforeFootCorrections = Quaternion.Angle(RightLegEnd.rotation, _rightTarget!.rotation);
@@ -1429,6 +1434,7 @@ internal sealed class AvatarIK
     private void ReleaseIkTargets()
     {
         ResetSolveDiagnostics();
+        _handAdjustment.Dispose();
         _additional.Detach();
         var restoreRootCalibration = false;
         try

@@ -1,4 +1,13 @@
 {
+  "HAND ROTATION": "ROTACIÓN DE LAS MANOS",
+  "Palm roll: left {0} / right {1} deg": "Giro de las palmas: izquierda {0} / derecha {1} grados",
+  "Left palm: -15 deg": "Palma izquierda: -15 grados",
+  "Left palm: +15 deg": "Palma izquierda: +15 grados",
+  "Right palm: -15 deg": "Palma derecha: -15 grados",
+  "Right palm: +15 deg": "Palma derecha: +15 grados",
+  "Reset hand rotation": "Restablecer rotación de las manos",
+  "Active after full-body calibration": "Activo tras calibrar el cuerpo completo",
+  "Hold your palms together and adjust each hand using the mirror.\nPosition and game inputs stay the same. No recalibration needed.": "Junta las palmas y ajusta cada mano con el espejo.\nLa posición y los controles del juego no cambian. No hace falta recalibrar.",
   "FULL BODY SETTINGS": "AJUSTES DEL CUERPO",
   "CALIBRATE FULL BODY": "CALIBRAR EL CUERPO",
   "CALIBRATE FULL BODY  >": "CALIBRAR EL CUERPO  >",

@@ -108,9 +108,19 @@ internal static class AvatarPoseMath
         var minReach = MathF.Sqrt(MathF.Max(0f, upperLength * upperLength +
             lowerLength * lowerLength + 2f * upperLength * lowerLength * MathF.Cos(angle)));
         var totalLength = upperLength + lowerLength;
-        var maxReach = totalLength - MathF.Min(0.005f, totalLength * 0.001f);
+        var maxReach = totalLength;
         minReach = MathF.Min(minReach, maxReach);
         var distance = Math.Clamp(offset.Length(), minReach, maxReach);
+        // This analytic solve does not need a bent-knee epsilon to choose its
+        // bend plane. Shortening reach by 0.1% imposed ~5.1 degrees of flexion,
+        // including on a straight forward kick. Handle full extension directly
+        // to avoid cancellation in the square root below.
+        if (distance >= totalLength)
+        {
+            knee = hip + axis * upperLength;
+            foot = hip + axis * totalLength;
+            return Finite(knee) && Finite(foot);
+        }
         var along = (upperLength * upperLength + distance * distance - lowerLength * lowerLength) /
             (2f * distance);
         var outwards = MathF.Sqrt(MathF.Max(0f, upperLength * upperLength - along * along));

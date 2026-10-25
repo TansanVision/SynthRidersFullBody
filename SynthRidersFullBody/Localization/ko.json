@@ -1,4 +1,13 @@
 {
+  "HAND ROTATION": "손 방향",
+  "Palm roll: left {0} / right {1} deg": "손바닥 회전: 왼쪽 {0} / 오른쪽 {1}도",
+  "Left palm: -15 deg": "왼손 손바닥: -15도",
+  "Left palm: +15 deg": "왼손 손바닥: +15도",
+  "Right palm: -15 deg": "오른손 손바닥: -15도",
+  "Right palm: +15 deg": "오른손 손바닥: +15도",
+  "Reset hand rotation": "손 방향 초기화",
+  "Active after full-body calibration": "전신 캘리브레이션 후 적용",
+  "Hold your palms together and adjust each hand using the mirror.\nPosition and game inputs stay the same. No recalibration needed.": "손바닥을 맞대고 거울을 보며 각 손의 방향을 조정하세요.\n위치와 게임 입력은 유지됩니다. 다시 캘리브레이션할 필요가 없습니다.",
   "FULL BODY SETTINGS": "전신 트래킹 설정",
   "CALIBRATE FULL BODY": "전신 캘리브레이션",
   "CALIBRATE FULL BODY  >": "전신 캘리브레이션  >",

@@ -1,4 +1,13 @@
 {
+  "HAND ROTATION": "HANDAUSRICHTUNG",
+  "Palm roll: left {0} / right {1} deg": "Handflächendrehung: links {0} / rechts {1} Grad",
+  "Left palm: -15 deg": "Linke Handfläche: -15 Grad",
+  "Left palm: +15 deg": "Linke Handfläche: +15 Grad",
+  "Right palm: -15 deg": "Rechte Handfläche: -15 Grad",
+  "Right palm: +15 deg": "Rechte Handfläche: +15 Grad",
+  "Reset hand rotation": "Handausrichtung zurücksetzen",
+  "Active after full-body calibration": "Nach Ganzkörperkalibrierung aktiv",
+  "Hold your palms together and adjust each hand using the mirror.\nPosition and game inputs stay the same. No recalibration needed.": "Legen Sie die Handflächen aneinander und richten Sie jede Hand im Spiegel aus.\nPosition und Spieleingaben bleiben gleich. Keine erneute Kalibrierung nötig.",
   "FULL BODY SETTINGS": "GANZKÖRPER-EINSTELLUNGEN",
   "CALIBRATE FULL BODY": "KÖRPER KALIBRIEREN",
   "CALIBRATE FULL BODY  >": "KÖRPER KALIBRIEREN  >",

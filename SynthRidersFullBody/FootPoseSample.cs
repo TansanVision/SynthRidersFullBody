@@ -12,6 +12,13 @@ namespace SynthRidersFullBody;
 internal readonly record struct FootPoseSample(float? AnkleError, float? AnkleAngle, float? EndAngle,
     float? Reach, float? TargetSlope, float? SolvedSlope)
 {
+    /// <summary>その時点の大腿・下腿の合計長。ユーザーの実脚長ではありません。</summary>
+    public float? LegLength { get; init; } = null;
+    /// <summary>同じソルバー結果の股関節から、入力された足首目標までの距離です。</summary>
+    public float? TargetDistance { get; init; } = null;
+    /// <summary>現在の骨長と目標距離だけから要求される膝の屈曲角。ユーザーの実姿勢の推定値ではありません。</summary>
+    public float? TargetKneeFlex { get; init; } = null;
+
     /// <summary>同じ計算フレームの関節・目標だけを使用して、足首と足先を区別して計測します。</summary>
     /// <param name="hip">股関節位置。</param>
     /// <param name="knee">膝位置。</param>
@@ -24,19 +31,34 @@ internal readonly record struct FootPoseSample(float? AnkleError, float? AnkleAn
     public static FootPoseSample Capture(Vector3 hip, Vector3 knee, Vector3 ankle, Quaternion ankleRotation,
         Vector3 end, Quaternion endRotation, TrackedFootPose target)
     {
-        var length = Vector3.Distance(hip, knee) + Vector3.Distance(knee, ankle);
+        var upperLength = Vector3.Distance(hip, knee);
+        var lowerLength = Vector3.Distance(knee, ankle);
+        var length = upperLength + lowerLength;
         if (!Finite(hip) || !Finite(knee) || !Finite(ankle) || !Finite(end) ||
             !Finite(target.AnklePosition) || !Finite(target.EndPosition) || !float.IsFinite(length) || length < .000001f)
             return default;
+        var distance = Vector3.Distance(hip, target.AnklePosition);
+        float? targetFlex = upperLength > .000001f && lowerLength > .000001f
+            ? (float)(Math.Acos(Math.Clamp(((double)distance * distance -
+                (double)upperLength * upperLength - (double)lowerLength * lowerLength) /
+                (2.0 * upperLength * lowerLength), -1.0, 1.0)) * 180.0 / Math.PI)
+            : null;
         return new(Vector3.Distance(ankle, target.AnklePosition), Angle(ankleRotation, target.AnkleRotation),
-            Angle(endRotation, target.EndRotation), Vector3.Distance(hip, target.AnklePosition) / length,
-            Slope(target.EndPosition - target.AnklePosition), Slope(end - ankle));
+            Angle(endRotation, target.EndRotation), distance / length,
+            Slope(target.EndPosition - target.AnklePosition), Slope(end - ankle))
+        {
+            LegLength = length,
+            TargetDistance = distance,
+            TargetKneeFlex = targetFlex
+        };
     }
 
     /// <summary>ゼロの誤差と未計測を区別し、ゲーム言語に依存しない書式で表します。</summary>
     public string Summary => $"ankle error={Number(AnkleError, "0.000")}m/{Number(AnkleAngle, "0.#")}deg; " +
         $"end rotation error={Number(EndAngle, "0.#")}deg; reach={Number(Reach, "0.000")}; " +
-        $"foot slope target/solved={Number(TargetSlope, "0.#")}/{Number(SolvedSlope, "0.#")}deg";
+        $"foot slope target/solved={Number(TargetSlope, "0.#")}/{Number(SolvedSlope, "0.#")}deg; " +
+        $"target knee flex={Number(TargetKneeFlex, "0.#")}deg; " +
+        $"leg length={Number(LegLength, "0.000")}m; hip-to-ankle target={Number(TargetDistance, "0.000")}m";
 
     /// <summary>足首から足先へ向かうボーン方向の仰角。足裏や床面の角度とは区別します。</summary>
     private static float? Slope(Vector3 axis) => axis.LengthSquared() < 1e-12f ? null :

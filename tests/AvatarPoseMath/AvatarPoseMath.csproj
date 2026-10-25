@@ -7,6 +7,7 @@
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../SynthRidersFullBody/HeadPoseFreshness.cs" Link="HeadPoseFreshness.cs" />
     <Compile Include="../../SynthRidersFullBody/PanelInteraction.cs" Link="PanelInteraction.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibrationFlow.cs" Link="CalibrationFlow.cs" />
     <Compile Include="../../SynthRidersFullBody/UiText.cs" Link="UiText.cs" />
@@ -15,6 +16,7 @@
     <Compile Include="../../SynthRidersFullBody/ExpressionControls.cs" Link="ExpressionControls.cs" />
     <Compile Include="../../SynthRidersFullBody/AvatarExpressions.cs" Link="AvatarExpressions.cs" />
     <Compile Include="../../SynthRidersFullBody/AvatarHmdVisibility.cs" Link="AvatarHmdVisibility.cs" />
+    <Compile Include="../../SynthRidersFullBody/AvatarHeadsetRenderGuard.cs" Link="AvatarHeadsetRenderGuard.cs" />
     <Compile Include="../../SynthRidersFullBody/ModConfig.cs" Link="ModConfig.cs" />
     <Compile Include="../../SynthRidersFullBody/AvatarPoseMath.cs" Link="AvatarPoseMath.cs" />
     <Compile Include="../../SynthRidersFullBody/KneePoseSample.cs" Link="KneePoseSample.cs" />

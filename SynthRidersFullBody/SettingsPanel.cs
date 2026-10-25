@@ -67,6 +67,8 @@ internal enum PanelCommand
     ExpressionsChanged,
     /// <summary>UIの共通設定を保存します。</summary>
     UiPreferencesChanged,
+    /// <summary>手の回転補正を保存します。再キャリブレーションは不要です。</summary>
+    HandRotationChanged,
     /// <summary>現在位置を基準に詳細パネルだけを置き直します。</summary>
     RepositionUi
 }
@@ -128,6 +130,7 @@ internal sealed partial class SettingsPanel
     private bool _tPoseMode = true;
     private bool _roleScreen => _navigation.Current == PanelPage.Trackers;
     private bool _visualScreen => _navigation.Current == PanelPage.Display;
+    private int _visualPage;
     private bool _expressionScreen => _navigation.Current == PanelPage.Expressions;
     private ExpressionButton? _expressionButton;
     private int _expressionHand;
@@ -535,6 +538,7 @@ internal sealed partial class SettingsPanel
     private PanelCommand HandleRow(int row, Tracking tracking, Camera camera)
     {
         if (_expressionScreen) return HandleExpressionRow(row);
+        if (_visualScreen && _visualPage == 1) return HandleHandRotationRow(row);
         if (_visualScreen && row == 4)
         {
             _appearanceScreen = true;
@@ -602,6 +606,7 @@ internal sealed partial class SettingsPanel
     /// <summary>未確定の個体と下位画面の選択を破棄します。保存済みの割り当ては変更しません。</summary>
     private void DiscardSelection()
     {
+        _visualPage = 0;
         _appearanceScreen = false;
         _assignmentDraft = _automaticDraft = null;
         _confirmingAutomatic = false;
@@ -658,8 +663,10 @@ internal sealed partial class SettingsPanel
             PanelControls.Paging(_controls, PanelControls.DashboardPrevious, PanelControls.DashboardNext, _dashboardPage, _dashboardPages);
         }
         if (_appearanceScreen) UpdateAppearanceControls();
+        else if (_visualScreen && _visualPage == 1) UpdateHandRotationControls();
         else if (_visualScreen)
         {
+            SetPaging(0, 2);
             _controls[0] = new(PanelControlKind.Toggle, true, cameraGuide);
             _controls[1] = new(PanelControlKind.Toggle, true, !shadowsOff);
             _controls[2] = new(PanelControlKind.Toggle, true, !lightsOff);
@@ -1073,6 +1080,7 @@ internal sealed partial class SettingsPanel
         bool cameraGuideUnavailable, bool shadowsOff, bool lightsOff,
         bool avatarHmdAvailable, bool avatarVisibleInHmd)
     {
+        if (_visualPage == 1) { UpdateHandRotationText(); return; }
         _title!.text = UiText.Get("VISUAL OPTIONS");
         _status!.text = UiText.Status(!cameraGuideEnabled ? "Camera guide: OFF" :
             cameraGuideUnavailable ? "Camera guide: unavailable (see log)" : _cameraGuideStatus);

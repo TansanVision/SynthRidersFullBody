@@ -7,6 +7,9 @@
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../SynthRidersFullBody/HandTargetAdjustment.cs" Link="HandTargetAdjustment.cs" />
+    <Compile Include="../../SynthRidersFullBody/TrackingSpaceAnchor.cs" Link="TrackingSpaceAnchor.cs" />
+    <Compile Include="../../SynthRidersFullBody/LevelTrackingSpace.cs" Link="LevelTrackingSpace.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibratedHeadTarget.cs" Link="CalibratedHeadTarget.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibrationSession.cs" Link="CalibrationSession.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibrationRecoveryMath.cs" Link="CalibrationRecoveryMath.cs" />

@@ -7,8 +7,9 @@ namespace SynthRidersFullBody;
 /// <summary>
 /// ゲームの一人称表示設定を操作し、アバターごとのHMD表示設定を再適用します。
 /// </summary>
-internal sealed class AvatarHmdVisibility
+internal sealed class AvatarHmdVisibility : IDisposable
 {
+    private readonly AvatarHeadsetRenderGuard _renderGuard = new();
     private AvatarLoader? _loader;
     private float _nextSearch;
     private int _boundLoaderId;
@@ -24,6 +25,21 @@ internal sealed class AvatarHmdVisibility
 
     /// <summary>最後に適用したアバター・表示希望値・HMD描画マスクの診断情報です。</summary>
     public string LastApplication { get; private set; } = "";
+
+    /// <summary>HMDに残る通常レイヤーの小物を隠す描画イベントを登録します。</summary>
+    public void Initialize() => _renderGuard.Initialize();
+
+    /// <summary>前フレームで描画が中断されても非表示が他カメラへ残らないよう復元します。</summary>
+    public void RecoverRenderState() => _renderGuard.Recover();
+
+    /// <summary>小物を含む描画対象とHMDイベントの実行状況をログへ渡します。</summary>
+    public string? TakeRenderDiagnostic() => _renderGuard.TakeDiagnostic();
+
+    /// <summary>描画イベント側で捕捉したエラーを返します。</summary>
+    public string? RenderError => _renderGuard.Error;
+
+    /// <summary>HMD限定の一時描画変更とイベントを解除します。</summary>
+    public void Dispose() => _renderGuard.Dispose();
 
     /// <summary>
     /// 現在ロードされているアバターのルートを取得します。
@@ -109,7 +125,10 @@ internal sealed class AvatarHmdVisibility
         // still applied: the game can reset both settings and camera in place.
         var settingChanged = !SettingsMatch(loader!, desired);
         if (!settingChanged && _appliedVisible == desired && _appliedMask == headset.cullingMask)
+        {
+            _renderGuard.Update(loader!.vrmObject, headset, !desired);
             return false;
+        }
         if (Time.unscaledTime < _nextApply) return false;
         return Apply(loader!, headset, desired, settingChanged ? "saved setting changed" : "headset/view refresh");
     }
@@ -169,6 +188,7 @@ internal sealed class AvatarHmdVisibility
                 Error = $"Game reset headset visibility during view refresh; {SettingDiagnostics(loader)}.";
                 return false;
             }
+            _renderGuard.Update(loader.vrmObject, headset, !desired);
             _appliedVisible = desired;
             _appliedMask = headset.cullingMask;
             Error = null;
@@ -217,6 +237,7 @@ internal sealed class AvatarHmdVisibility
     /// <summary>読み込み中や対象不在の状態を、前回の適用完了として扱わないようにします。</summary>
     private void ResetBinding()
     {
+        _renderGuard.Update(null, null, false);
         _boundLoaderId = _boundAvatarId = _boundHeadsetId = 0;
         _boundKey = null;
         _appliedVisible = null;

@@ -189,12 +189,15 @@ namespace UnityEngine
     {
         public int GetInstanceID() => transform.GetInstanceID();
         public string name;
+        public int layer;
         public bool activeInHierarchy = true;
         public Scene scene { get; } = new();
         public Transform transform { get; }
         public GameObject(string name) { this.name = name; transform = new Transform(this); }
         public T? GetComponentInChildren<T>(bool includeInactive) where T : Component =>
             transform.GetComponentsInChildren<T>(includeInactive).FirstOrDefault();
+        public T[] GetComponentsInChildren<T>(bool includeInactive) where T : Component =>
+            transform.GetComponentsInChildren<T>(includeInactive);
     }
     public class Scene { public bool Valid = true; public int handle = 1; public bool IsValid() => Valid; }
     public class Transform : Component
@@ -217,7 +220,7 @@ namespace UnityEngine
             Instances.OfType<T>().Where(c => c.transform.IsChildOf(this)).ToArray();
     }
     public enum CameraType { Game, Reflection, Preview }
-    public class Camera : Component
+    public partial class Camera : Component
     {
         public bool stereoEnabled;
         public bool enabled = true;

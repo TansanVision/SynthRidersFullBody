@@ -130,6 +130,7 @@ $documentationFiles = @(
     'docs/DEVELOPMENT_NOTES.md',
     'docs/DEVELOPMENT_BACKLOG.md',
     'docs/ULTIMATE_TRACKER_INVESTIGATION.md',
+    'docs/TRACKING_KNOWLEDGE.md',
     'LICENSE',
     'THIRD_PARTY_NOTICES.md'
 )

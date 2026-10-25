@@ -63,6 +63,18 @@ internal static class ExpressionControlTests
         Step(0); bindings["LeftPrimary"] = new() { Expression = null! };
         check(Step(1) == "", "Null expression was not ignored.");
 
+        controls.Reset(); bindings.Clear();
+        bindings["RightPrimary"] = new() { Expression = "preset:happy" };
+        string Hands(int pressed, int available, string left, string right) => controls.Update(
+            new(pressed, available, left + "|" + right, left, right), bindings, true, valid.Contains);
+        Hands(0, 63, "xr-left", "xr-right");
+        check(Hands(8, 63, "xr-left", "xr-right") == "preset:happy", "Right button could not activate.");
+        check(Hands(8, 56, "unavailable", "xr-right") == "preset:happy", "Losing left input reset a held right expression.");
+        check(Hands(8, 63, "steam-left", "xr-right") == "preset:happy", "Left source fallback reset right input.");
+        check(Hands(8, 63, "steam-left", "replacement-right") == "", "Replacement right input fired while held.");
+        Hands(0, 63, "steam-left", "replacement-right");
+        check(Hands(8, 63, "steam-left", "replacement-right") == "preset:happy", "Right replacement did not re-arm after release.");
+
         foreach (var (oldName, newName) in new[] { ("Joy", "happy"), ("Sorrow", "sad"),
                      ("Fun", "relaxed"), ("A", "aa"), ("I", "ih"), ("U", "ou"), ("E", "ee"),
                      ("O", "oh"), ("Blink_L", "blinkLeft"), ("Blink_R", "blinkRight"), ("Angry", "angry") })

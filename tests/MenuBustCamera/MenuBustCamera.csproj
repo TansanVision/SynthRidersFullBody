@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../SynthRidersFullBody/MenuBustCamera.cs" Link="MenuBustCamera.cs" />
+    <Compile Include="../../SynthRidersFullBody/AvatarHeadsetRenderGuard.cs" Link="AvatarHeadsetRenderGuard.cs" />
     <Compile Include="../../SynthRidersFullBody/MenuBustFraming.cs" Link="MenuBustFraming.cs" />
   </ItemGroup>
 </Project>

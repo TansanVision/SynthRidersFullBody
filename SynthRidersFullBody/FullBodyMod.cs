@@ -2,7 +2,7 @@ using MelonLoader;
 using Il2CppSynth.Avatars;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.59.5", "SynthRidersFullBody")]
+[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.59.8", "SynthRidersFullBody")]
 
 namespace SynthRidersFullBody;
 
@@ -25,6 +25,9 @@ public sealed class FullBodyMod : MelonMod
     private readonly AvatarHmdVisibility _avatarHmdVisibility = new();
     private readonly AvatarExpressions _expressions = new();
     private ExpressionInput _expressionInput;
+    private string _expressionDiagnostic = "";
+    private float _nextExpressionDiagnostic;
+    private float _nextSpaceWarning;
     private float _retryExpressionsAt;
     private AvatarIK? _avatar;
     private float _calibrationEnd;
@@ -79,6 +82,9 @@ public sealed class FullBodyMod : MelonMod
             }
             _tracking = new Tracking(_config);
             _panel.SetUiConfiguration(_config);
+            // Restore avatar renderers before capture-camera listeners inspect them.
+            try { _avatarHmdVisibility.Initialize(); }
+            catch (Exception exception) { LoggerInstance.Warning($"HMD renderer guard initialization failed: {exception}"); }
             try { _menuBustCamera.Initialize(); }
             catch (Exception exception) { LoggerInstance.Warning($"Menu bust camera initialization failed: {exception}"); }
             TrySaveConfig();
@@ -107,6 +113,7 @@ public sealed class FullBodyMod : MelonMod
     public override void OnDeinitializeMelon()
     {
         ResetExpressions(true);
+        _avatarHmdVisibility.Dispose();
         _avatarRendering.Restore();
         _captureCameraGuide.Dispose();
         _menuBustCamera.Dispose();
@@ -151,6 +158,7 @@ public sealed class FullBodyMod : MelonMod
     /// </summary>
     public override void OnLateUpdate()
     {
+        _avatarHmdVisibility.RecoverRenderState();
         if (_tracking == null || _config == null || Time.unscaledTime < _retryTrackingAt)
             return;
         try
@@ -251,9 +259,12 @@ public sealed class FullBodyMod : MelonMod
             {
                 if (_avatarHmdVisibility.ApplySaved(_config))
                     LoggerInstance.Msg($"Saved VRM headset visibility reapplied. {_avatarHmdVisibility.LastApplication}");
-                if (_avatarHmdVisibility.Error != null && Time.unscaledTime >= _nextHeadsetVisibilityErrorLog)
+                var renderDiagnostic = _avatarHmdVisibility.TakeRenderDiagnostic();
+                if (renderDiagnostic != null) LoggerInstance.Msg($"VRM HMD render coverage: {renderDiagnostic}");
+                var visibilityError = _avatarHmdVisibility.Error ?? _avatarHmdVisibility.RenderError;
+                if (visibilityError != null && Time.unscaledTime >= _nextHeadsetVisibilityErrorLog)
                 {
-                    LoggerInstance.Warning($"VRM headset visibility update failed: {_avatarHmdVisibility.Error}");
+                    LoggerInstance.Warning($"VRM headset visibility update failed: {visibilityError}");
                     _nextHeadsetVisibilityErrorLog = Time.unscaledTime + 30f;
                 }
             }
@@ -308,6 +319,11 @@ public sealed class FullBodyMod : MelonMod
             // SourceLabel describes current HMD availability, not a change to
             // the explicitly assigned devices. A brief outage must not erase calibration.
             var frame = _tracking.ReadWorldPoses(camera);
+            if (_tracking.SpaceWarning is { } warning && Time.unscaledTime >= _nextSpaceWarning)
+            {
+                LoggerInstance.Warning(warning);
+                _nextSpaceWarning = Time.unscaledTime + 30f;
+            }
             var hasPoses = frame.Complete;
             var waist = frame.Waist;
             var left = frame.Left;
@@ -565,6 +581,7 @@ public sealed class FullBodyMod : MelonMod
                 _panel.Reposition(_menuButton.PanelReference(camera), camera);
                 return;
             case PanelCommand.UiPreferencesChanged:
+            case PanelCommand.HandRotationChanged:
                 TrySaveConfig();
                 return;
             case PanelCommand.ExpressionsChanged:
@@ -650,6 +667,14 @@ public sealed class FullBodyMod : MelonMod
         {
             _expressions.Refresh(_avatarHmdVisibility.GetActiveAvatarRoot() ?? _avatar?.Animator?.gameObject);
             _expressionInput = _tracking.ReadExpressionButtons();
+            var diagnostic = $"sources={_expressionInput.Source}; available(left/right)=" +
+                $"{_expressionInput.Available & 7}/{(_expressionInput.Available >> 3) & 7}";
+            if (diagnostic != _expressionDiagnostic && Time.unscaledTime >= _nextExpressionDiagnostic)
+            {
+                LoggerInstance.Msg("Expression input: " + diagnostic + "; bits=primary:1 secondary:2 grip:4.");
+                _expressionDiagnostic = diagnostic;
+                _nextExpressionDiagnostic = Time.unscaledTime + 5f;
+            }
         }
         catch (Exception exception) { ExpressionError(exception); }
     }
@@ -794,8 +819,7 @@ public sealed class FullBodyMod : MelonMod
         }
         if (_rebaseOnRecovery)
         {
-            if (!_tracking.CanRebase(_sessionCalibration.SpaceSource)) return;
-            _tracking.CaptureWorldAnchor(camera);
+            if (!_tracking.RebaseWorldAnchors(camera)) return;
         }
         if (!_tracking.TryGetSpace(_sessionCalibration.SpaceSource, out var space) ||
             !_tracking.ReadWorldPoses(camera).HasWaist) return;

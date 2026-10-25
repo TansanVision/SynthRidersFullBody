@@ -27,7 +27,8 @@ public sealed record ExpressionBinding
 }
 
 /// <summary>読み取れたボタン、押下中のボタン、入力元の識別子です。</summary>
-internal readonly record struct ExpressionInput(int Pressed, int Available, string Source);
+internal readonly record struct ExpressionInput(int Pressed, int Available, string Source,
+    string? LeftSource = null, string? RightSource = null);
 
 /// <summary>アバターが公開している表情の保存用IDと表示名です。</summary>
 internal readonly record struct ExpressionChoice(string Id, string Label);
@@ -39,6 +40,7 @@ internal sealed class ExpressionControls
     private int _previous;
     private int _armed;
     private string? _source;
+    private string? _leftSource, _rightSource;
     private readonly List<ExpressionButton> _held = new();
     private ExpressionButton? _latched;
 
@@ -47,6 +49,7 @@ internal sealed class ExpressionControls
     {
         _previous = _armed = 0;
         _source = null;
+        _leftSource = _rightSource = null;
         _held.Clear();
         _latched = null;
     }
@@ -60,7 +63,17 @@ internal sealed class ExpressionControls
         bool enabled, Func<string, bool> exists)
     {
         if (!enabled) { Reset(); return ""; }
-        if (_source != input.Source) { Reset(); _source = input.Source; }
+        if (input.LeftSource != null && input.RightSource != null)
+        {
+            var changed = (_leftSource != input.LeftSource ? 7 : 0) | (_rightSource != input.RightSource ? 56 : 0);
+            _armed &= ~changed;
+            _previous &= ~changed;
+            _held.RemoveAll(b => (changed & (1 << (int)b)) != 0);
+            if (_latched is { } latched && (changed & (1 << (int)latched)) != 0) _latched = null;
+            _leftSource = input.LeftSource; _rightSource = input.RightSource;
+            _source = input.Source;
+        }
+        else if (_source != input.Source) { Reset(); _source = input.Source; }
         // A button must first be observed released on a valid device. This also
         // prevents a held button from firing after calibration or reconnect.
         _armed = (_armed | (input.Available & ~input.Pressed)) & input.Available;

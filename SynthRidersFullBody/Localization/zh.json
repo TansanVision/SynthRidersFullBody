@@ -1,4 +1,13 @@
 {
+  "HAND ROTATION": "手部朝向",
+  "Palm roll: left {0} / right {1} deg": "手掌旋转：左 {0} / 右 {1} 度",
+  "Left palm: -15 deg": "左手掌：-15度",
+  "Left palm: +15 deg": "左手掌：+15度",
+  "Right palm: -15 deg": "右手掌：-15度",
+  "Right palm: +15 deg": "右手掌：+15度",
+  "Reset hand rotation": "重置手部朝向",
+  "Active after full-body calibration": "全身校准后生效",
+  "Hold your palms together and adjust each hand using the mirror.\nPosition and game inputs stay the same. No recalibration needed.": "双手合十，对照镜子分别调整左右手的朝向。\n位置和游戏操作保持不变。无需重新校准。",
   "FULL BODY SETTINGS": "全身追踪设置",
   "CALIBRATE FULL BODY": "全身校准",
   "CALIBRATE FULL BODY  >": "全身校准  >",

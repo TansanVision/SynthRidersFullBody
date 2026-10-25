@@ -42,7 +42,7 @@ internal static class TrackedAnkleConstraintTests
                 {
                     check(Math.Abs(Quaternion.Dot(result.Ankle, desiredRotation)) > .99999f,
                         "Correction flattened a measured raised foot or retained the unintended 50 degree tilt.");
-                    check(Vector3.Distance(solvedAnkle, hip + Vector3.Normalize(requested - hip) * (length * .999f)) < .00002f,
+                    check(Vector3.Distance(solvedAnkle, hip + Vector3.Normalize(requested - hip) * length) < .00002f,
                         "The ankle did not reach the bone-length-limited goal.");
                     var measured = FootPoseSample.Capture(hip, solvedKnee, solvedAnkle, result.Ankle,
                         solvedAnkle, result.Ankle, target);
@@ -94,7 +94,7 @@ internal static class TrackedAnkleConstraintTests
                 "A backward/upward ankle goal could not be constrained.");
             var solvedKnee = Vector3.Transform(knee, result.Upper);
             var solvedAnkle = solvedKnee + Vector3.Transform(ankle - knee, result.Lower);
-            var expected = axis * ((lengths.Item1 + lengths.Item2) * .999f);
+            var expected = axis * (lengths.Item1 + lengths.Item2);
             check(Vector3.Distance(solvedAnkle, expected) < .00001f,
                 "Joint rotation order failed for unequal lengths or an opposite goal.");
             check(Math.Abs(Vector3.Distance(solvedKnee, solvedAnkle) - lengths.Item2) < .00001f,

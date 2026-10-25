@@ -12,7 +12,11 @@ internal static class AvatarHmdVisibilityTests
         var loader = new AvatarLoader();
         AvatarLoader.s_instance = loader;
         var config = new ModConfig();
-        var visibility = new AvatarHmdVisibility();
+        using var visibility = new AvatarHmdVisibility();
+        visibility.Initialize();
+        var accessoryObject = new GameObject("Backpack") { layer = 0 };
+        accessoryObject.transform.parent = loader.vrmObject!.transform;
+        var accessory = new MeshRenderer(accessoryObject);
         var key = AvatarHmdVisibility.AvatarKey(loader)!;
         config.AvatarVisibleInHeadset[key] = false;
         check(visibility.ApplySaved(config) && loader.specificSettings!.HideInFirtPersonView &&
@@ -20,6 +24,10 @@ internal static class AvatarHmdVisibilityTests
             "Saved hidden preference was not applied.");
         check(!visibility.ApplySaved(config) && loader.ToggleCount == 0,
             "Visibility still relied on a menu toggle with an unspecified setting target.");
+        Camera.onPreCull?.Invoke(loader.m_HMDCamera!);
+        check(accessory.forceRenderingOff, "A default-layer accessory bypassed saved HMD hiding.");
+        Camera.onPostRender?.Invoke(loader.m_HMDCamera!);
+        check(!accessory.forceRenderingOff, "Saved HMD hiding leaked outside a render.");
 
         // The common view can change independently from per-avatar calibration/settings.
         loader.infoProvider!.HideInFirtPersonView = false;
@@ -68,6 +76,9 @@ internal static class AvatarHmdVisibilityTests
             !loader.specificSettings.HideInFirtPersonView &&
             (loader.m_HMDCamera.cullingMask & AvatarLoader.AvatarLayerBit) != 0,
             "Explicit ON did not persist and refresh the headset view.");
+        Camera.onPreCull?.Invoke(loader.m_HMDCamera!);
+        check(!accessory.forceRenderingOff, "ON left accessory suppression active.");
+        Camera.onPostRender?.Invoke(loader.m_HMDCamera!);
         var capture = new Camera("Capture");
         var captureMask = capture.cullingMask;
         check(visibility.TryToggle(config) && !config.AvatarVisibleInHeadset[key] &&
@@ -97,6 +108,11 @@ internal static class AvatarHmdVisibilityTests
         check(visibility.ApplySaved(config) &&
             (loader.m_HMDCamera.cullingMask & AvatarLoader.AvatarLayerBit) == 0,
             "A temporary native view failure never recovered.");
+        Camera.onPreCull?.Invoke(loader.m_HMDCamera!);
+        check(accessory.forceRenderingOff, "A failed toggle prevented subsequent HMD accessory suppression.");
+        visibility.RequestRefresh();
+        check(!accessory.forceRenderingOff, "Scene refresh retained temporary hidden renderers.");
+        visibility.ApplySaved(config);
 
         loader.ThrowOnLayers = true;
         check(!visibility.TryToggle(config) && !config.AvatarVisibleInHeadset[key] &&

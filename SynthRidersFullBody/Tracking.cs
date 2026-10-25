@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.XR;
 using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.XR;
@@ -45,37 +45,6 @@ internal readonly record struct TrackerFrame(Pose Waist, Pose Left, Pose Right,
     /// 腰と左右足のすべてに有効な姿勢があるかを示します。
     /// </summary>
     public bool Complete => HasWaist && HasLeft && HasRight;
-}
-
-// Keep the tracking origin established at calibration. Rebuilding it from the
-// HMD on every frame can move stationary trackers during a quick head turn.
-/// <summary>
-/// 各APIの追跡空間からゲームのワールド空間への固定剛体変換です。
-/// </summary>
-/// <param name="Translation">追跡原点のゲーム内ワールド位置。</param>
-/// <param name="Rotation">追跡空間からワールド空間への回転。</param>
-internal readonly record struct TrackingSpaceAnchor(Vector3 Translation, Quaternion Rotation)
-{
-    /// <summary>
-    /// 同時刻の生HMD姿勢とゲーム内カメラ姿勢を一致させる変換を作成します。
-    /// </summary>
-    /// <param name="head">取得元APIの追跡空間で計測したHMDの生姿勢。</param>
-    /// <param name="camera">ゲーム内のHMD視点として使用するカメラ。</param>
-    /// <returns>追跡空間をゲーム空間へ合わせる平行移動と回転。</returns>
-    public static TrackingSpaceAnchor FromHead(Pose head, Camera camera)
-    {
-        var rotation = camera.transform.rotation * Quaternion.Inverse(head.Rotation);
-        return new TrackingSpaceAnchor(camera.transform.position - rotation * head.Position,
-            rotation);
-    }
-
-    /// <summary>
-    /// 追跡空間の姿勢へ固定した原点変換を適用します。
-    /// </summary>
-    /// <param name="raw">取得元APIの追跡空間で表した生姿勢。</param>
-    /// <returns>ゲームのワールド空間の姿勢。</returns>
-    public Pose ToWorld(Pose raw) =>
-        new(Translation + Rotation * raw.Position, Rotation * raw.Rotation);
 }
 
 /// <summary>
@@ -134,6 +103,9 @@ internal readonly record struct TrackerTelemetry(TrackingDevice Device, Pose Pos
 /// </summary>
 internal sealed class Tracking
 {
+    private readonly HeadPoseFreshness _headFreshness = new();
+    /// <summary>別APIのHMD停止を疑う診断。追跡やキャリブレーションを拒否する条件にはしません。</summary>
+    public string? SpaceWarning { get; private set; }
     private readonly List<InputDevice> _xrDevices = new();
     private readonly List<TrackingDevice> _devices = new();
     private readonly AssignmentDevices _assignmentDevices = new();
@@ -381,8 +353,11 @@ internal sealed class Tracking
     public string CalibrationDiagnostics(Camera camera)
     {
         var lines = new List<string>();
+        if (SpaceWarning != null) lines.Add("WARNING: " + SpaceWarning);
         lines.Add($"Ultimate Tracker 180 correction: {(_config.UltimateTrackerRotate180 ? "ON" : "OFF")}; " +
             $"detected={_devices.Count(IsUltimateTracker)}");
+        var unused = _devices.Where(d => d.Kind == "Tracker" && !TrackerRoles.All.Any(r => Assigned(r)?.Key == d.Key));
+        lines.Add("Unassigned trackers: " + string.Join(", ", unused.Select(d => $"{d.Source} #{d.Id} {d.Serial}")));
         foreach (var source in new[] { "SteamVR", "Unity XR" })
         {
             if (!_anchors.TryGetValue(source, out var anchor))
@@ -444,6 +419,22 @@ internal sealed class Tracking
         foreach (var source in new[] { "SteamVR", "Unity XR" })
             if (RawHead(source, out var head)) _anchors[source] = TrackingSpaceAnchor.FromHead(head, camera);
         return _anchors.Count > 0;
+    }
+
+    /// <summary>
+    /// シーン移動ではゲーム側XR原点の変化だけを全APIへ適用し、SteamVRとの位置合わせを保持します。
+    /// SteamVR側HMDが停止していても、曲間の現在の首の傾きで再校正しません。
+    /// </summary>
+    public bool RebaseWorldAnchors(Camera camera)
+    {
+        // Prefer the runtime driving the actual game camera. Re-registering
+        // every API from its HMD independently changes cross-runtime offsets.
+        var source = _anchors.ContainsKey("Unity XR") ? "Unity XR" : "SteamVR";
+        if (!_anchors.TryGetValue(source, out var previous) || !RawHead(source, out var head)) return false;
+        var current = TrackingSpaceAnchor.FromHead(head, camera);
+        foreach (var key in _anchors.Keys.ToArray())
+            _anchors[key] = _anchors[key].Rebase(previous, current);
+        return true;
     }
     /// <summary>
     /// 保存した取得元ごとの固定原点とUltimate Trackerの補正中心をすべて破棄します。
@@ -603,6 +594,16 @@ internal sealed class Tracking
     /// <returns>部位ごとの追跡可否を含む現在のフレーム。</returns>
     public TrackerFrame ReadWorldPoses(Camera camera)
     {
+        SpaceWarning = null;
+        if (RawHead("SteamVR", out var steamHead) && RawHead("Unity XR", out var nativeHead))
+        {
+            var s = steamHead.Rotation;
+            var n = nativeHead.Rotation;
+            if (_headFreshness.Update(TPoseCalibration.ToNumerics(steamHead.Position), new(s.x, s.y, s.z, s.w),
+                TPoseCalibration.ToNumerics(nativeHead.Position), new(n.x, n.y, n.z, n.w), Time.unscaledTime))
+                SpaceWarning = "SteamVR HMD pose appears stale while Unity XR HMD is moving. Check the SteamVR headset/space connection before recalibrating; saved registration is retained across songs.";
+        }
+        else _headFreshness.Reset();
         _rolePoses.Clear();
         foreach (var role in TrackerRoles.All)
             if (TryWorld(Assigned(role), camera, true, out var pose)) _rolePoses[role] = pose;
@@ -684,17 +685,37 @@ internal sealed class Tracking
     /// <summary>手首割り当てを優先して、表情操作用の左右ボタンを同じデバイスから取得します。</summary>
     public ExpressionInput ReadExpressionButtons()
     {
-        ResolveControllers();
-        var left = ExpressionButtons(_uiLeft);
-        var right = ExpressionButtons(_uiRight);
+        var left = ReadExpressionHand(true);
+        var right = ReadExpressionHand(false);
         return new ExpressionInput(left.Pressed | (right.Pressed << 3),
-            left.Available | (right.Available << 3), $"{_uiLeft?.Key}|{_uiRight?.Key}");
+            left.Available | (right.Available << 3), $"{left.Source}|{right.Source}", left.Source, right.Source);
+    }
+
+    /// <summary>表情入力は光学姿勢やポインター選択から独立して読み、手首の明示割り当てを優先します。</summary>
+    private ExpressionInput ReadExpressionHand(bool left)
+    {
+        var assigned = Assigned(left ? TrackerRole.LeftWrist : TrackerRole.RightWrist);
+        if (assigned?.Kind == "Controller")
+        {
+            var buttons = ExpressionButtons(assigned);
+            return new(buttons.Pressed, buttons.Available, assigned.Key);
+        }
+        // Prefer the game's OpenXR button API even if SteamVR owns the
+        // pointer. Its legacy button API may not expose Quest A/B buttons.
+        foreach (var device in _devices.Where(d => d.Kind == "Controller" &&
+                     d.Side == (left ? "LeftHand" : "RightHand"))
+                     .OrderByDescending(d => d.Source == "Unity XR").ThenBy(d => d.Key, StringComparer.Ordinal))
+        {
+            var buttons = ExpressionButtons(device);
+            if (buttons.Available != 0) return new(buttons.Pressed, buttons.Available, device.Key);
+        }
+        return new(0, 0, "unavailable");
     }
 
     /// <summary>指定個体の主・副・グリップボタンを読み取り、未対応入力と未押下を区別します。</summary>
     private (int Pressed, int Available) ExpressionButtons(TrackingDevice? device)
     {
-        if (device == null || device.Kind != "Controller" || !HasRawPose(device)) return default;
+        if (device == null || device.Kind != "Controller") return default;
         if (device.Source == "SteamVR") return _steamVr.ExpressionButtons(device.Id);
         var xr = _xrDevices.FirstOrDefault(d => d.deviceId.ToString() == device.Id);
         if (!xr.isValid) return default;

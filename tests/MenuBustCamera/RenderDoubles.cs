@@ -24,6 +24,8 @@ namespace UnityEngine
     }
     public sealed class Transform
     {
+        public Transform? parent;
+        public bool IsChildOf(Transform other) => this == other || parent?.IsChildOf(other) == true;
         public Vector3 localPosition, lossyScale = new(1, 1, 1);
         public Quaternion localRotation = new(System.Numerics.Quaternion.Identity);
         public Vector3 position => localPosition;
@@ -36,15 +38,29 @@ namespace UnityEngine
             localRotation = q;
         }
     }
-    public sealed class GameObject { public bool activeInHierarchy = true; public int layer; }
+    public sealed class GameObject
+    {
+        public bool activeInHierarchy = true;
+        public int layer;
+        public string name = "Avatar";
+        public Transform transform = new();
+        public List<Renderer> Renderers = new();
+        public int GetInstanceID() => GetHashCode();
+        public T[] GetComponentsInChildren<T>(bool includeInactive) => Renderers.Cast<T>().ToArray();
+    }
     public sealed class Renderer
     {
         public GameObject gameObject = new();
+        public Transform transform => gameObject.transform;
+        public string name => gameObject.name;
+        public int GetInstanceID() => GetHashCode();
         public bool enabled = true, forceRenderingOff;
         public Rendering.ShadowCastingMode shadowCastingMode;
     }
     public sealed class Camera
     {
+        public string name = "Camera";
+        public int GetInstanceID() => GetHashCode();
         public Transform transform = new();
         public GameObject gameObject = new();
         public bool stereoEnabled, orthographic;

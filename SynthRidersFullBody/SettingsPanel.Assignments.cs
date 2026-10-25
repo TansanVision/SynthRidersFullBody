@@ -222,6 +222,8 @@ internal sealed partial class SettingsPanel
     /// <summary>表示中の一覧だけを移動し、端から反対側へ循環させません。</summary>
     private void ChangePage(int direction)
     {
+        _nextTextUpdate = 0f;
+        if (_visualScreen && !_appearanceScreen) _visualPage = Math.Clamp(_visualPage + direction, 0, 1);
         if (_roleScreen)
         {
             if (_assignmentDraft != null) _confirmationPage = MovePage(_confirmationPage, _assignmentDraft.ChangedRoles.Count, direction);

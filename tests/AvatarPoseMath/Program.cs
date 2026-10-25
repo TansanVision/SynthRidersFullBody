@@ -6,6 +6,8 @@ KneeReferenceTests.Run(Check);
 KneePoseSampleTests.Run(Check);
 TrackedFootPoseTests.Run(Check);
 TrackedAnkleConstraintTests.Run(Check);
+StraightLegTests.Run(Check);
+HeadPoseFreshnessTests.Run(Check);
 FootPoseWindowTests.Run(Check);
 MenuBustCameraTests.Run(Check);
 CameraContextTests.Run(Check);
@@ -301,6 +303,7 @@ Check(!AvatarScaleMath.TryFit(Vector3.Zero, Vector3.One, new(0, 2, 0), Vector3.Z
 CameraResolverTests.Run(Check);
 CameraGuideDrawTests.Run(Check);
 AvatarHmdVisibilityTests.Run(Check);
+AvatarHeadsetRenderGuardTests.Run(Check);
 ToeRotationTests.Run(Check);
 CalibrationPoseTests.Run(Check);
 UltimateTrackerCorrectionTests.Run(Check);
