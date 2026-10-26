@@ -1,4 +1,8 @@
 {
+  "After Start, arms sideways at shoulder height, palms down. You have 5 seconds.": "开始后，将双臂平举至肩高，手掌朝下。您有5秒钟。",
+  "Arms at your sides, palms facing your body, feet apart. You have 3 seconds.": "双臂垂于身体两侧，手掌朝向身体，双脚分开。您有3秒钟。",
+  "Look at the front dot. Arms sideways, palms down. Hold still.": "看向前方圆点。双臂平举，手掌朝下，保持不动。",
+  "Look at the front dot. Arms at sides, palms inward. Hold still.": "看向前方圆点。双臂垂于体侧，手掌朝内，保持不动。",
   "HAND ROTATION": "手部朝向",
   "Palm roll: left {0} / right {1} deg": "手掌旋转：左 {0} / 右 {1} 度",
   "Left palm: -15 deg": "左手掌：-15度",

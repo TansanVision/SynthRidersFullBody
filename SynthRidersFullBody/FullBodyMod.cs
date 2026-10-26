@@ -2,7 +2,7 @@ using MelonLoader;
 using Il2CppSynth.Avatars;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.59.8", "SynthRidersFullBody")]
+[assembly: MelonInfo(typeof(SynthRidersFullBody.FullBodyMod), "Synth Riders Full Body", "0.59.9", "SynthRidersFullBody")]
 
 namespace SynthRidersFullBody;
 
@@ -337,8 +337,10 @@ public sealed class FullBodyMod : MelonMod
                 _calibrationRequired ? "Body IK: calibration required" :
                 !frame.HasWaist ? "Body IK: game (waist not tracked)" : _avatar.SolverStatus,
                 !frame.HasWaist ? "Waist: input unavailable" : _avatar?.WaistMotionSummary ?? "");
-            var hasLeftHand = _tracking.TryGetControllerWorldPose(camera, true, out var leftHand);
-            var hasRightHand = _tracking.TryGetControllerWorldPose(camera, false, out var rightHand);
+            var hasLeftHand = _tracking.TryGetControllerWorldPose(camera, true, out var leftHand, out var leftHandSource);
+            var hasRightHand = _tracking.TryGetControllerWorldPose(camera, false, out var rightHand, out var rightHandSource);
+            var hands = new HandCalibrationInput(hasLeftHand ? new(leftHandSource, leftHand) : null,
+                hasRightHand ? new(rightHandSource, rightHand) : null);
             var hasHands = hasLeftHand && hasRightHand;
             var hasLeftPointer = _tracking.TryGetControllerPointerWorldPose(camera, true, out var leftAim);
             var hasRightPointer = _tracking.TryGetControllerPointerWorldPose(camera, false, out var rightAim);
@@ -451,13 +453,13 @@ public sealed class FullBodyMod : MelonMod
                     if (stable && _avatar != null && !_avatar.CalibrationSizeReady)
                         roleError ??= _avatar.CalibrationSizeStatus;
                     var saved = stable && _avatar != null && _tracking.TryGetCalibrationSpace(out var source, out var space)
-                        ? _avatar.CaptureSession(stableWaist, stableLeft, stableRight, stableAdditional, source, space, camera) : null;
+                        ? _avatar.CaptureSession(stableWaist, stableLeft, stableRight, stableAdditional, source, space, camera, hands) : null;
                     if (tPose.Warning != null)
                         LoggerInstance.Warning($"Calibration posture warning (non-blocking): {tPose.Warning}.");
                     if (hasPoses && stable && tPose.Ready && roleError == null &&
                         _avatar != null && _avatar.Animator != null &&
                         _avatar.Animator.gameObject.activeInHierarchy &&
-                        _avatar.Calibrate(stableWaist, stableLeft, stableRight, camera, stableAdditional))
+                        _avatar.Calibrate(stableWaist, stableLeft, stableRight, camera, stableAdditional, hands: hands))
                     {
                         _avatar.HideTPosePreview();
                         _nextPoseDiagnostics = _nextAutomaticPoseDiagnostics = Time.unscaledTime + 2f;
@@ -466,6 +468,10 @@ public sealed class FullBodyMod : MelonMod
                         _calibrationRequired = false;
                         _sessionCalibration = saved;
                         _tracking.ConfirmAssignments();
+                        // A fresh standard-pose calibration replaces the previous
+                        // hand tuning. Scene recovery keeps the user's fine tuning.
+                        if (hasLeftHand) _config.LeftHandRollDegrees = 0f;
+                        if (hasRightHand) _config.RightHandRollDegrees = 0f;
                         TrySaveConfig();
                         _panel.FinishCalibration("Calibration complete", true, tPose.Warning);
                         LoggerInstance.Msg($"Full body calibration completed. Drive mode: {_avatar.DriveMode}.");
@@ -480,6 +486,8 @@ public sealed class FullBodyMod : MelonMod
                         foreach (var role in TrackerRoles.All.Where(_tracking.HasAssignment))
                             LoggerInstance.Msg($"Assigned {TrackerRoles.Label(role)}: {_tracking.AssignmentLabel(role)}.");
                         LoggerInstance.Msg($"Calibration reference pose: {_avatar.CalibrationPoseSource}.");
+                        LoggerInstance.Msg($"Calibration hands: {_avatar.HandCalibrationStatus}.");
+                        LoggerInstance.Msg($"Calibration torso: {_avatar.CalibrationTorsoSummary}.");
                         LoggerInstance.Msg($"Calibration size: {_avatar.CalibrationSizeStatus}.");
                         LoggerInstance.Msg($"Avatar fit: {_avatar.CalibrationFitSummary(camera, stableLeft, stableRight)}.");
                         if (_avatar.IkError != null) LoggerInstance.Warning(_avatar.IkError);
@@ -521,7 +529,7 @@ public sealed class FullBodyMod : MelonMod
                         out waist, out left, out right);
                 else
                     _poseFilter.Reset();
-                _avatar.Apply(waist, left, right, camera, frame.HasLeft, frame.HasRight, _tracking.RolePoses);
+                _avatar.Apply(waist, left, right, camera, frame.HasLeft, frame.HasRight, _tracking.RolePoses, hands);
                 if (_avatar.DriveMode != _lastDriveMode)
                 {
                     _lastDriveMode = _avatar.DriveMode;

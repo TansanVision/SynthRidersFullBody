@@ -86,8 +86,8 @@ internal sealed class CalibrationStageView
         _message.rectTransform.sizeDelta = new Vector2(620, flow.Stage == CalibrationStage.Review ? 460 : 340);
         _message.rectTransform.anchoredPosition = new Vector2(0, flow.Stage == CalibrationStage.Review ? 0 : -150);
         if (flow.CountingDown)
-            _message.text = UiText.Get(tPose ? "Look at the front dot. Arms sideways at shoulder height. Hold still."
-                : "Look at the front dot. Arms relaxed, feet apart. Hold still.") +
+            _message.text = UiText.Get(tPose ? "Look at the front dot. Arms sideways, palms down. Hold still."
+                : "Look at the front dot. Arms at sides, palms inward. Hold still.") +
                 (liveWarning == null ? "" : "\n\n" + UiText.Format("WARNING: {0}", UiText.Status(liveWarning)));
         else if (flow.Stage == CalibrationStage.Review)
             _message.text = UiText.Status(flow.Result ?? "") + "\n\n" + UiText.Get(flow.Succeeded

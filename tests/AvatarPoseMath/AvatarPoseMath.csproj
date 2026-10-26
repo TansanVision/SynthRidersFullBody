@@ -7,6 +7,8 @@
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../SynthRidersFullBody/PalmPoseMath.cs" Link="PalmPoseMath.cs" />
+    <Compile Include="../../SynthRidersFullBody/TorsoPoseSample.cs" Link="TorsoPoseSample.cs" />
     <Compile Include="../../SynthRidersFullBody/HeadPoseFreshness.cs" Link="HeadPoseFreshness.cs" />
     <Compile Include="../../SynthRidersFullBody/PanelInteraction.cs" Link="PanelInteraction.cs" />
     <Compile Include="../../SynthRidersFullBody/CalibrationFlow.cs" Link="CalibrationFlow.cs" />

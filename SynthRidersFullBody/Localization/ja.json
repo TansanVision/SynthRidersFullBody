@@ -1,4 +1,8 @@
 {
+  "After Start, arms sideways at shoulder height, palms down. You have 5 seconds.": "開始後、腕を肩の高さに広げ、手のひらを下へ向けてください。5秒間あります。",
+  "Arms at your sides, palms facing your body, feet apart. You have 3 seconds.": "腕を体の横に下ろし、手のひらを体側へ向け、足を開いて立ってください。3秒間あります。",
+  "Look at the front dot. Arms sideways, palms down. Hold still.": "正面の点を見て、腕を横に広げ、手のひらを下へ向けて静止してください。",
+  "Look at the front dot. Arms at sides, palms inward. Hold still.": "正面の点を見て、腕を体の横に下ろし、手のひらを体側へ向けて静止してください。",
   "HAND ROTATION": "手の向き",
   "Palm roll: left {0} / right {1} deg": "手のひらの回転：左 {0} 度 / 右 {1} 度",
   "Left palm: -15 deg": "左の手のひら：-15度",

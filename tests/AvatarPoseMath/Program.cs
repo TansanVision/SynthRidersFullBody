@@ -8,6 +8,7 @@ TrackedFootPoseTests.Run(Check);
 TrackedAnkleConstraintTests.Run(Check);
 StraightLegTests.Run(Check);
 HeadPoseFreshnessTests.Run(Check);
+PalmPoseTests.Run(Check);
 FootPoseWindowTests.Run(Check);
 MenuBustCameraTests.Run(Check);
 CameraContextTests.Run(Check);

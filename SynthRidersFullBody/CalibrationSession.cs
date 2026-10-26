@@ -27,9 +27,11 @@ internal readonly record struct CalibrationBone(string Path, Vector3 Position, Q
 /// <param name="SpaceSource">校正の腰入力が使用した取得元APIの識別名。</param>
 /// <param name="Space">校正時の追跡空間からワールド空間への固定変換。</param>
 /// <param name="Headset">校正時のHMD姿勢。復帰時の現在姿勢やゲームの中間目標から取り直しません。</param>
+/// <param name="Hands">標準の掌面へ合わせた元のコントローラー入力と取得元。</param>
 internal sealed record CalibrationSession(string AvatarKey, string RigSignature,
     CalibrationBone[] Bones, Pose Root, Vector3 Scale, Pose Waist, Pose Left, Pose Right,
-    Dictionary<TrackerRole, Pose> Additional, string SpaceSource, TrackingSpaceAnchor Space, Pose? Headset = null)
+    Dictionary<TrackerRole, Pose> Additional, string SpaceSource, TrackingSpaceAnchor Space, Pose? Headset = null,
+    HandCalibrationInput Hands = default)
 {
     /// <summary>
     /// 保存した姿勢を、校正時の追跡原点から現在の追跡原点へ移します。

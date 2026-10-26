@@ -30,6 +30,8 @@ internal sealed class AvatarCalibrationPose
     }
 
     private readonly Animator _animator;
+    /// <summary>左右の掌面を骨格情報から標準方向へ合わせられたかを示します。</summary>
+    public string PalmStatus { get; private set; } = "not captured";
     private readonly BonePose[] _reference;
     private readonly float _rootLocalY;
     private readonly Quaternion _rootLocalRotation;
@@ -240,6 +242,43 @@ internal sealed class AvatarCalibrationPose
         var rightDirection = tPose ? right : (Vector3.down + right * 0.12f).normalized;
         AlignArm(HumanBodyBones.LeftUpperArm, HumanBodyBones.LeftLowerArm, HumanBodyBones.LeftHand, leftDirection);
         AlignArm(HumanBodyBones.RightUpperArm, HumanBodyBones.RightLowerArm, HumanBodyBones.RightHand, rightDirection);
+        var leftPalm = AlignPalm(true, leftDirection, tPose ? Vector3.down : right);
+        var rightPalm = AlignPalm(false, rightDirection, tPose ? Vector3.down : -right);
+        PalmStatus = $"left={(leftPalm ? "standard" : "reference fallback")}, right={(rightPalm ? "standard" : "reference fallback")}";
+    }
+
+    /// <summary>指の配置またはVRIKの手軸から掌面を求め、Tポーズでは下、直立では体側へ向けます。</summary>
+    private bool AlignPalm(bool left, Vector3 fingersDirection, Vector3 palmDirection)
+    {
+        var hand = _animator.GetBoneTransform(left ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
+        if (hand == null) return false;
+        var index = _animator.GetBoneTransform(left ? HumanBodyBones.LeftIndexProximal : HumanBodyBones.RightIndexProximal);
+        var little = _animator.GetBoneTransform(left ? HumanBodyBones.LeftLittleProximal : HumanBodyBones.RightLittleProximal);
+        var middle = _animator.GetBoneTransform(left ? HumanBodyBones.LeftMiddleProximal : HumanBodyBones.RightMiddleProximal);
+        var inverse = Quaternion.Inverse(hand.rotation);
+        if (index != null && little != null)
+        {
+            var first = index.position - hand.position;
+            var last = little.position - hand.position;
+            if (PalmPoseMath.TryFingerReference(left, N(inverse * first), N(inverse * last),
+                middle != null ? N(inverse * (middle.position - hand.position)) : null,
+                N(fingersDirection), N(palmDirection), out var rotation))
+            {
+                hand.rotation = new Quaternion(rotation.X, rotation.Y, rotation.Z, rotation.W);
+                return true;
+            }
+        }
+        var arm = left ? _ik?.solver?.leftArm : _ik?.solver?.rightArm;
+        return arm != null && TrySetPalm(hand, arm.wristToPalmAxis,
+            Vector3.Cross(arm.wristToPalmAxis, arm.palmToThumbAxis) * (left ? -1f : 1f), fingersDirection, palmDirection);
+    }
+
+    /// <summary>有効な掌面の基底がある場合だけ手ボーンを回し、位置や指の形は変えません。</summary>
+    private static bool TrySetPalm(Transform hand, Vector3 localFingers, Vector3 localPalm, Vector3 fingers, Vector3 palm)
+    {
+        if (!PalmPoseMath.TryRotation(N(localFingers), N(localPalm), N(fingers), N(palm), out var rotation)) return false;
+        hand.rotation = new Quaternion(rotation.X, rotation.Y, rotation.Z, rotation.W);
+        return true;
     }
 
     /// <summary>

@@ -735,12 +735,18 @@ internal sealed class Tracking
     /// <param name="camera">ゲーム内のHMD視点として使用するカメラ。</param>
     /// <param name="left">左側を選択するか。falseなら右側を選択します。</param>
     /// <param name="pose">成功時に、指定した手のワールド姿勢を受け取ります。</param>
+    /// <param name="source">回転校正の対応を確認するためのAPI・個体識別子。</param>
     /// <returns>指定した手の有効な姿勢を取得できた場合はtrue。</returns>
-    public bool TryGetControllerWorldPose(Camera camera, bool left, out Pose pose)
+    public bool TryGetControllerWorldPose(Camera camera, bool left, out Pose pose, out string source)
     {
-        ResolveControllers();
         var role = left ? TrackerRole.LeftWrist : TrackerRole.RightWrist;
-        return TryWorld(HasAssignment(role) ? Assigned(role) : left ? _uiLeft : _uiRight, camera, true, out pose);
+        // Hand calibration must not change source merely because a trigger
+        // changed which pointer is active. Keep the game's tracked API first.
+        var device = HasAssignment(role) ? Assigned(role) : _devices
+            .Where(d => d.Kind == "Controller" && d.Side == (left ? "LeftHand" : "RightHand") && HasRawPose(d))
+            .OrderByDescending(d => d.Source == "Unity XR").ThenBy(d => d.Key, StringComparer.Ordinal).FirstOrDefault();
+        source = device?.Key ?? "";
+        return TryWorld(device, camera, true, out pose);
     }
     /// <summary>
     /// トリガーと同じ個体の照準姿勢を取得し、取得できない場合はその個体のグリップ姿勢を使います。

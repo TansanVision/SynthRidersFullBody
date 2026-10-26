@@ -1,4 +1,8 @@
 {
+  "After Start, arms sideways at shoulder height, palms down. You have 5 seconds.": "시작 후 팔을 어깨 높이로 벌리고 손바닥을 아래로 향하세요. 5초가 주어집니다.",
+  "Arms at your sides, palms facing your body, feet apart. You have 3 seconds.": "팔을 몸 옆으로 내리고 손바닥을 몸 쪽으로 향한 채 발을 벌리세요. 3초가 주어집니다.",
+  "Look at the front dot. Arms sideways, palms down. Hold still.": "정면의 점을 보세요. 팔을 옆으로 벌리고 손바닥을 아래로 향한 채 가만히 계세요.",
+  "Look at the front dot. Arms at sides, palms inward. Hold still.": "정면의 점을 보세요. 팔을 몸 옆으로 내리고 손바닥을 안쪽으로 향한 채 가만히 계세요.",
   "HAND ROTATION": "손 방향",
   "Palm roll: left {0} / right {1} deg": "손바닥 회전: 왼쪽 {0} / 오른쪽 {1}도",
   "Left palm: -15 deg": "왼손 손바닥: -15도",

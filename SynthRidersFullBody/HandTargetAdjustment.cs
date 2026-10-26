@@ -8,6 +8,20 @@ internal sealed class HandTargetAdjustment : IDisposable
 {
     private readonly Slot _left = new("Left"), _right = new("Right");
 
+    /// <summary>標準の手ボーンとコントローラーの回転を校正します。明示手首トラッカー側はnullで除外します。</summary>
+    public void Capture(HandCalibrationInput input, Pose? leftHand, Pose? rightHand)
+    {
+        _left.Calibration.Capture(input.Left, leftHand);
+        _right.Calibration.Capture(input.Right, rightHand);
+        UpdateInput(input);
+    }
+
+    /// <summary>現在の左右入力を渡します。欠測した側だけゲーム標準の手目標へ戻します。</summary>
+    public void UpdateInput(HandCalibrationInput input) { _left.Input = input.Left; _right.Input = input.Right; }
+
+    /// <summary>左右それぞれの自動校正の有無をログへ表示します。</summary>
+    public string CalibrationStatus => $"left={_left.Calibration.Calibrated}, right={_right.Calibration.Calibrated}";
+
     /// <summary>指先方向を軸として左右の手を個別に回します。位置と腕の重みは維持します。</summary>
     public void Apply(IKSolverVR solver, float leftDegrees, float rightDegrees)
     {
@@ -28,6 +42,8 @@ internal sealed class HandTargetAdjustment : IDisposable
         private readonly string _name;
         private Transform? _target, _previous;
         private IKSolverVR.Arm? _arm;
+        public readonly CalibratedHandRotation Calibration = new();
+        public ControllerHandPose? Input;
 
         /// <summary>診断用の左右名を保存します。目標は補正が有効になってから作成します。</summary>
         public Slot(string name) => _name = name;
@@ -35,7 +51,8 @@ internal sealed class HandTargetAdjustment : IDisposable
         /// <summary>ボーン固有の手首から指先への軸を使い、校正済み目標のローカル回転へ加算します。</summary>
         public void Apply(IKSolverVR.Arm arm, float degrees)
         {
-            if (Mathf.Abs(degrees) < .01f || arm.target == null || arm.wristToPalmAxis.sqrMagnitude < .0001f) return;
+            var calibratedRotation = Calibration.Apply(Input);
+            if (arm.target == null || (calibratedRotation == null && Mathf.Abs(degrees) < .01f)) return;
             if (_target == null)
             {
                 var go = new GameObject($"SynthRidersFullBody.{_name}HandAdjustment");
@@ -44,8 +61,9 @@ internal sealed class HandTargetAdjustment : IDisposable
             }
             _previous = arm.target;
             _arm = arm;
-            _target.SetPositionAndRotation(_previous.position,
-                _previous.rotation * Quaternion.AngleAxis(degrees, arm.wristToPalmAxis.normalized));
+            var roll = arm.wristToPalmAxis.sqrMagnitude < .0001f ? Quaternion.identity :
+                Quaternion.AngleAxis(degrees, arm.wristToPalmAxis.normalized);
+            _target.SetPositionAndRotation(_previous.position, (calibratedRotation ?? _previous.rotation) * roll);
             arm.target = _target;
         }
 

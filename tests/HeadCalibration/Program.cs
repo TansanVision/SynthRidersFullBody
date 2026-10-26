@@ -6,6 +6,7 @@ using NQuat = System.Numerics.Quaternion;
 var checks = 0;
 TrackingSpaceTests.Run(Check);
 HandAdjustmentTests.Run(Check);
+HandCalibrationTests.Run(Check);
 foreach (var size in new[] { .2f, 1f, 2.5f })
 foreach (var yaw in new[] { 0f, 90f, 180f, 270f })
 {

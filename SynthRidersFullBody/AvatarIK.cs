@@ -94,13 +94,15 @@ internal sealed class AvatarIK
     /// <param name="source">取得元APIの識別名。</param>
     /// <param name="space">追跡空間からゲームのワールド空間への固定変換。</param>
     /// <param name="camera">校正時のHMDカメラ。復帰時も使用する元の入力姿勢を保存します。</param>
+    /// <param name="hands">掌面の自動回転校正に使用した元の入力。</param>
     /// <returns>同じゲーム起動中の校正復帰に使用するスナップショット。</returns>
     public CalibrationSession CaptureSession(Pose waist, Pose left, Pose right,
-        IReadOnlyDictionary<TrackerRole, Pose> additional, string source, TrackingSpaceAnchor space, Camera camera) =>
+        IReadOnlyDictionary<TrackerRole, Pose> additional, string source, TrackingSpaceAnchor space, Camera camera,
+        HandCalibrationInput hands = default) =>
         new(AvatarKey, _calibrationPose.RigSignature, _calibrationPose.CaptureBones(),
             new Pose(Animator.transform.position, Animator.transform.rotation), Animator.transform.lossyScale,
             waist, left, right, additional.ToDictionary(x => x.Key, x => x.Value), source, space,
-            new Pose(camera.transform.position, camera.transform.rotation));
+            new Pose(camera.transform.position, camera.transform.rotation), hands);
 
     /// <summary>
     /// アバター識別子・骨格・拡縮比が保存済み校正と互換かを確認します。
@@ -132,7 +134,8 @@ internal sealed class AvatarIK
         var success = _calibrationPose.WithReference(saved, saved.Remap(saved.Root, space), () =>
             Calibrate(saved.Remap(saved.Waist, space), saved.Remap(saved.Left, space),
                 saved.Remap(saved.Right, space), camera, additional,
-                saved.Headset is { } head ? saved.Remap(head, space) : null));
+                saved.Headset is { } head ? saved.Remap(head, space) : null,
+                saved.Hands.Remap(pose => saved.Remap(pose, space))));
         // The next current tracker frame fills the targets before a solver update.
         if (success)
         {
@@ -152,6 +155,8 @@ internal sealed class AvatarIK
     private readonly CalibratedToeRotation _rightToeRotation;
     private readonly CalibratedHeadTarget _calibratedHead = new();
     private readonly HandTargetAdjustment _handAdjustment = new();
+    /// <summary>掌面の標準化とコントローラーの自動回転校正の結果です。</summary>
+    public string HandCalibrationStatus => $"palms=({_calibrationPose.PalmStatus}); controller rotation=({_handAdjustment.CalibrationStatus})";
     /// <summary>
     /// VRIKに左足先が登録されていれば足先、なければ左足首のボーンを取得します。
     /// </summary>
@@ -163,6 +168,10 @@ internal sealed class AvatarIK
     private RigidPoseOffset _leftEndOffset;
     private RigidPoseOffset _rightEndOffset;
     private readonly Transform? _chest;
+    private readonly Transform? _neck, _headBone, _leftEye, _rightEye;
+    private TorsoPoseSample _referenceTorso, _solvedTorso;
+    /// <summary>基準姿勢での頭・首・胸・腰・目の相対位置を示します。</summary>
+    public string CalibrationTorsoSummary => _referenceTorso.Summary;
     private readonly VRIK? _ik;
     private IKSolverVR? _boundSolver;
     private bool _hasIkSnapshot;
@@ -313,6 +322,10 @@ internal sealed class AvatarIK
         _rightToeRotation = new CalibratedToeRotation(_rightFoot, animator.GetBoneTransform(HumanBodyBones.RightToes));
         _chest = animator.GetBoneTransform(HumanBodyBones.Chest) ??
             animator.GetBoneTransform(HumanBodyBones.UpperChest);
+        _neck = animator.GetBoneTransform(HumanBodyBones.Neck);
+        _headBone = animator.GetBoneTransform(HumanBodyBones.Head);
+        _leftEye = animator.GetBoneTransform(HumanBodyBones.LeftEye);
+        _rightEye = animator.GetBoneTransform(HumanBodyBones.RightEye);
         MeasureLegLengths();
     }
 
@@ -523,6 +536,7 @@ internal sealed class AvatarIK
             _additional.ApplyToeRotations(_hasLeftTracking, _hasRightTracking);
             _pelvisErrorAfterSolve = Vector3.Distance(_hips.position, _pelvisTarget!.position);
             _pelvisDeltaAfterSolve = _hips.position - _pelvisTarget.position;
+            _solvedTorso = SampleTorso(_lastPelvisYaw * _bodyForwardReference);
             _pelvisAngleAfterSolve = Quaternion.Angle(_hips.rotation, _pelvisTarget.rotation);
             _leftFootErrorAfterSolve = Vector3.Distance(LeftLegEnd.position, _leftTarget!.position);
             _rightFootErrorAfterSolve = Vector3.Distance(RightLegEnd.position, _rightTarget!.position);
@@ -649,10 +663,12 @@ internal sealed class AvatarIK
     /// <param name="camera">現在のHMDカメラ。保存校正からの復帰でも追跡入力として使用します。</param>
     /// <param name="additional">部位ごとの追跡姿勢。校正・駆動処理ではゲームのワールド空間を使用します。</param>
     /// <param name="savedHeadset">復帰時は元の校正のHMD姿勢を指定します。現在の首の傾きで取り直しません。</param>
+    /// <param name="hands">選択した標準姿勢でのコントローラー入力。復帰時は保存値を指定します。</param>
     /// <returns>必要な目標を接続し、追跡を開始できる場合はtrue。</returns>
     /// <remarks>手動校正では固定プレビューと静止区間の平均入力を使用します。シーン復帰では保存した基準姿勢を一時適用してから呼び出します。</remarks>
     public bool Calibrate(Pose waist, Pose left, Pose right, Camera? camera = null,
-        IReadOnlyDictionary<TrackerRole, Pose>? additional = null, Pose? savedHeadset = null)
+        IReadOnlyDictionary<TrackerRole, Pose>? additional = null, Pose? savedHeadset = null,
+        HandCalibrationInput hands = default)
     {
         _additional.Calibrate(additional ?? new Dictionary<TrackerRole, Pose>());
         _waistCalibrationPosition = waist.Position;
@@ -707,8 +723,16 @@ internal sealed class AvatarIK
         _headset = camera != null ? camera.transform : null;
         var referenceHeadset = savedHeadset ?? (camera != null
             ? new Pose(camera.transform.position, camera.transform.rotation) : (Pose?)null);
+        _referenceTorso = SampleTorso(_bodyForwardReference, referenceHeadset);
         _calibratedHead.Capture(additional?.ContainsKey(TrackerRole.Head) == true ? null : referenceHeadset,
             head != null ? new Pose(head.position, head.rotation) : default);
+        var leftHand = Animator.GetBoneTransform(HumanBodyBones.LeftHand);
+        var rightHand = Animator.GetBoneTransform(HumanBodyBones.RightHand);
+        // Explicit wrist trackers already have a complete calibrated target.
+        // Native game hand positions remain untouched; only rotation is registered.
+        _handAdjustment.Capture(hands,
+            leftHand != null && !_additional.Has(TrackerRole.LeftWrist) ? new(leftHand.position, leftHand.rotation) : null,
+            rightHand != null && !_additional.Has(TrackerRole.RightWrist) ? new(rightHand.position, rightHand.rotation) : null);
         _hasHeadReference = head != null && headTarget != null && referenceHeadset is { IsFinite: true };
         if (_hasHeadReference)
         {
@@ -1032,17 +1056,19 @@ internal sealed class AvatarIK
     /// <param name="hasLeft">左足の追跡姿勢が有効か。</param>
     /// <param name="hasRight">右足の追跡姿勢が有効か。</param>
     /// <param name="additional">部位ごとの追跡姿勢。校正・駆動処理ではゲームのワールド空間を使用します。</param>
+    /// <param name="hands">現在の左右のコントローラー入力。欠測した側はゲーム標準の回転を使用します。</param>
     public void Apply(Pose waist, Pose left, Pose right, Camera camera,
-        bool hasLeft, bool hasRight, IReadOnlyDictionary<TrackerRole, Pose> additional)
+        bool hasLeft, bool hasRight, IReadOnlyDictionary<TrackerRole, Pose> additional, HandCalibrationInput hands = default)
     {
         if (!_calibrated)
         {
             if (_requireExplicitCalibration || !hasLeft || !hasRight) return;
-            if (!Calibrate(waist, left, right, camera, additional)) return;
+            if (!Calibrate(waist, left, right, camera, additional, hands: hands)) return;
         }
         if (hasLeft) _lastLeftPose = left; else left = _lastLeftPose;
         if (hasRight) _lastRightPose = right; else right = _lastRightPose;
         _additional.Update(additional);
+        _handAdjustment.UpdateInput(hands);
         _calibratedHead.Update(!_usingGameTargets, _trackingBlend);
         if (!_additional.HeadTrackingAvailable && _rootController != null) _rootController.enabled = false;
         _leftKneeTracked = _additional.TryGet(TrackerRole.LeftKnee, out var leftKnee);
@@ -1211,6 +1237,7 @@ internal sealed class AvatarIK
             $"post-solve pelvis delta={_pelvisDeltaAfterSolve}, " +
             $"post-solve head error={DiagnosticNumber(_headErrorAfterSolve)}m/{DiagnosticNumber(_headAngleAfterSolve)}deg, " +
             $"post-solve head motion=({HeadMotionSummary}), " +
+            $"post-solve torso=({_solvedTorso.Summary}), " +
             $"end rotation error before foot corrections=({_leftEndAngleBeforeFootCorrections:0.#}/{_rightEndAngleBeforeFootCorrections:0.#})deg, " +
             $"ankle reach correction weights=({_leftAnkleConstraint.Weight:0.###}/{_rightAnkleConstraint.Weight:0.###}), " +
             $"ankle reach excess=({_leftAnkleConstraint.Excess:0.000}/{_rightAnkleConstraint.Excess:0.000})m, " +
@@ -1220,6 +1247,15 @@ internal sealed class AvatarIK
 
     /// <summary>未登録の頭目標を、ゼロの計測誤差と区別します。</summary>
     private static string DiagnosticNumber(float? value) => value?.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) ?? "n/a";
+
+    /// <summary>骨格とHMDを同じ時点で採取します。首や目がないモデルは推定値で補いません。</summary>
+    private TorsoPoseSample SampleTorso(Vector3 forward, Pose? referenceHeadset = null) => TorsoPoseSample.Capture(ToNumerics(_hips.position),
+        _chest != null ? ToNumerics(_chest.position) : null,
+        _neck != null ? ToNumerics(_neck.position) : null,
+        _headBone != null ? ToNumerics(_headBone.position) : null,
+        _leftEye != null && _rightEye != null ? ToNumerics((_leftEye.position + _rightEye.position) * .5f) : null,
+        referenceHeadset is { } saved ? ToNumerics(saved.Position) : _headset != null ? ToNumerics(_headset.position) : null,
+        ToNumerics(forward));
 
     /// <summary>前回ログからの足の変動範囲を取得し、次の区間へ切り替えます。</summary>
     /// <returns>計算直後の足の集計。単独フレームの診断と合わせて使用します。</returns>

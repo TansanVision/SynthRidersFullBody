@@ -43,13 +43,13 @@ public sealed class ModConfig
     /// <summary>プレイ外でアバター表示中の配信カメラを固定バストショットへ切り替えます。全アバター共通、初期値はOFFです。</summary>
     public bool MenuBustShot { get; set; }
     private float _leftHandRollDegrees, _rightHandRollDegrees;
-    /// <summary>左手のひらを手首から指先の軸まわりに回す角度。全アバター共通、既定値0度です。</summary>
+    /// <summary>自動校正後の左掌面の微調整角。手を取得できた新規キャリブレーション時は0に戻します。</summary>
     public float LeftHandRollDegrees
     {
         get => _leftHandRollDegrees;
         set => _leftHandRollDegrees = float.IsFinite(value) ? Math.Clamp(value, -180f, 180f) : 0f;
     }
-    /// <summary>右手のひらの回転補正角。位置・ゲーム操作には影響しません。</summary>
+    /// <summary>右掌面の微調整角。位置・ゲーム操作には影響せず、新規校正時は0に戻します。</summary>
     public float RightHandRollDegrees
     {
         get => _rightHandRollDegrees;

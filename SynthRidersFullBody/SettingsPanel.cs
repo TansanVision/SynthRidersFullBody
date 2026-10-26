@@ -919,8 +919,8 @@ internal sealed partial class SettingsPanel
             _views[PanelControls.TPose]!.Label.text = (_tPoseMode ? UiText.Get("[Selected] ") : "") + UiText.Get("T-pose");
             _views[PanelControls.Standing]!.Label.text = (!_tPoseMode ? UiText.Get("[Selected] ") : "") + UiText.Get("standing");
             _rows[2]!.text = UiText.Get("Face the FRONT arrow / mirror before checking feet");
-            _rows[3]!.text = UiText.Get(_tPoseMode ? "After Start, spread your arms at shoulder height. You have 5 seconds."
-                : "Relax your arms and stand with feet apart. You have 3 seconds.");
+            _rows[3]!.text = UiText.Get(_tPoseMode ? "After Start, arms sideways at shoulder height, palms down. You have 5 seconds."
+                : "Arms at your sides, palms facing your body, feet apart. You have 3 seconds.");
             _rows[4]!.text = _readiness.Ready ? UiText.Get("The avatar holds the selected pose until calibration finishes.")
                 : !_readiness.AvatarReady ? UiText.Get("Load an avatar in the game menu")
                 : _readiness.AdditionalIssue != null ? UiText.Status(_readiness.AdditionalIssue)

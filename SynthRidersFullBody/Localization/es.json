@@ -1,4 +1,8 @@
 {
+  "After Start, arms sideways at shoulder height, palms down. You have 5 seconds.": "Tras Iniciar, brazos a la altura de los hombros y palmas hacia abajo. Tienes 5 segundos.",
+  "Arms at your sides, palms facing your body, feet apart. You have 3 seconds.": "Brazos a los lados, palmas hacia el cuerpo y pies separados. Tienes 3 segundos.",
+  "Look at the front dot. Arms sideways, palms down. Hold still.": "Mira el punto de enfrente. Brazos extendidos, palmas hacia abajo. No te muevas.",
+  "Look at the front dot. Arms at sides, palms inward. Hold still.": "Mira el punto de enfrente. Brazos a los lados, palmas hacia dentro. No te muevas.",
   "HAND ROTATION": "ROTACIÓN DE LAS MANOS",
   "Palm roll: left {0} / right {1} deg": "Giro de las palmas: izquierda {0} / derecha {1} grados",
   "Left palm: -15 deg": "Palma izquierda: -15 grados",
